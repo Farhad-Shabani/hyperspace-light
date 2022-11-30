@@ -1,7 +1,7 @@
 use super::client::CosmosClient;
 use super::events::{
     event_is_type_channel, event_is_type_client, event_is_type_connection,
-    ibc_event_try_from_abci_event,
+    ibc_event_try_from_abci_event, IbcEventWithHeight,
 };
 use crate::core::error::Error;
 use crate::core::primitives::{Chain, IbcProvider, UpdateType};
@@ -87,8 +87,10 @@ where
         todo!()
     }
 
-    async fn ibc_events(&self) -> Pin<Box<dyn Stream<Item = IbcEvent>>> {
-        // Create websocket client
+    // Changed result: `Item =` from `IbcEvent` to `IbcEventWithHeight` to include the necessary height field, 
+    // as `height` is removed from `Attribute` from ibc-rs v0.22.0
+    async fn ibc_events(&self) -> Pin<Box<dyn Stream<Item = IbcEventWithHeight>>> {
+        // Create websocket client. Like what `EventMonitor::subscribe()` does in `hermes`
         let (ws_client, ws_driver) = WebSocketClient::new(self.websocket_url.clone())
             .await
             .map_err(|e| Error::from(format!("Web Socket Client Error {:?}", e)))
@@ -109,15 +111,15 @@ where
                 .unwrap();
             subscriptions.push(subscription);
         }
-
-        // Collect IBC events from each RPC event
+        // Collect IBC events from each RPC event, Like what `stream_batches()` does in `hermes`
         let all_subs: Box<
             dyn Stream<Item = core::result::Result<Event, RpcError>> + Send + Sync + Unpin,
         > = Box::new(select_all(subscriptions));
         let chain_id = self.chain_id.clone();
         let events = all_subs
             .map(move |event| {
-                let mut all_events: Vec<IbcEvent> = vec![];
+                // Like what `get_all_events()` does in `hermes`
+                let mut events_with_height: Vec<IbcEventWithHeight> = vec![];
                 let Event {
                     data,
                     events,
@@ -133,33 +135,47 @@ where
                         )
                         .map_err(|e| Error::from(format!("Error {:?}", e)))
                         .unwrap();
-                        all_events.push(ClientEvents::NewBlock::new(height).into());
-                        // all_events.append(&mut extract_block_events(height, &events));
+                        events_with_height.push(IbcEventWithHeight::new(
+                            ClientEvents::NewBlock::new(height).into(),
+                            height,
+                        ));
+                        // events_with_height.append(&mut extract_block_events(height, &events));
                     }
                     EventData::Tx { tx_result } => {
+                        let height = Height::new(
+                            ChainId::chain_version(chain_id.to_string().as_str()),
+                            tx_result.height as u64,
+                        )
+                        .map_err(|_| {
+                            Error::from(format!("tx_result.height: invalid header height of 0"))
+                        })
+                        .unwrap();
                         for abci_event in &tx_result.result.events {
                             if let Ok(ibc_event) = ibc_event_try_from_abci_event(abci_event) {
                                 if query == Query::eq("message.module", "ibc_client").to_string()
                                     && event_is_type_client(&ibc_event)
                                 {
-                                    all_events.push(ibc_event);
+                                    events_with_height
+                                        .push(IbcEventWithHeight::new(ibc_event, height));
                                 } else if query
                                     == Query::eq("message.module", "ibc_connection").to_string()
                                     && event_is_type_connection(&ibc_event)
                                 {
-                                    all_events.push(ibc_event);
+                                    events_with_height
+                                        .push(IbcEventWithHeight::new(ibc_event, height));
                                 } else if query
                                     == Query::eq("message.module", "ibc_channel").to_string()
                                     && event_is_type_channel(&ibc_event)
                                 {
-                                    all_events.push(ibc_event);
+                                    events_with_height
+                                        .push(IbcEventWithHeight::new(ibc_event, height));
                                 }
                             }
                         }
                     }
                     _ => {}
                 }
-                stream::iter(all_events)
+                stream::iter(events_with_height)
             })
             .flatten()
             .boxed();

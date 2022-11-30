@@ -1,8 +1,6 @@
 use core::convert::TryFrom;
 use core::fmt::{Display, Error as FmtError, Formatter};
-use ibc_relayer_types::clients::ics07_tendermint::header::{
-    decode_header as tm_decode_header,
-};
+use ibc_relayer_types::clients::ics07_tendermint::header::decode_header as tm_decode_header;
 use ibc_relayer_types::events::{Error as IbcEventError, IbcEvent, IbcEventType};
 use ibc_relayer_types::{
     core::ics02_client::{
@@ -26,6 +24,32 @@ use ibc_relayer_types::{
 
 use serde::Serialize;
 use tendermint::abci::Event as AbciEvent;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct IbcEventWithHeight {
+    pub event: IbcEvent,
+    pub height: Height,
+}
+
+impl IbcEventWithHeight {
+    pub fn new(event: IbcEvent, height: Height) -> Self {
+        Self { event, height }
+    }
+
+    pub fn with_height(self, height: Height) -> Self {
+        Self {
+            event: self.event,
+            height,
+        }
+    }
+}
+
+impl Display for IbcEventWithHeight {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), FmtError> {
+        write!(f, "{} at height {}", self.event, self.height)
+    }
+}
+
 pub fn event_is_type_client(ev: &IbcEvent) -> bool {
     matches!(
         ev,
@@ -62,31 +86,6 @@ pub fn event_is_type_channel(ev: &IbcEvent) -> bool {
             | IbcEvent::TimeoutPacket(_)
             | IbcEvent::TimeoutOnClosePacket(_)
     )
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct IbcEventWithHeight {
-    pub event: IbcEvent,
-    pub height: Height,
-}
-
-impl IbcEventWithHeight {
-    pub fn new(event: IbcEvent, height: Height) -> Self {
-        Self { event, height }
-    }
-
-    pub fn with_height(self, height: Height) -> Self {
-        Self {
-            event: self.event,
-            height,
-        }
-    }
-}
-
-impl Display for IbcEventWithHeight {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), FmtError> {
-        write!(f, "{} at height {}", self.event, self.height)
-    }
 }
 
 /// Note: This function, as well as other helpers, are needed as a workaround to

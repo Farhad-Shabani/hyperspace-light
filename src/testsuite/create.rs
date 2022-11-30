@@ -100,7 +100,7 @@ pub async fn create_connection(
     let future = chain_b
         .ibc_events()
         .await
-        .skip_while(|ev| future::ready(!matches!(ev, IbcEvent::OpenConfirmConnection(_))))
+        .skip_while(|ev| future::ready(!matches!(ev.event, IbcEvent::OpenConfirmConnection(_))))
         .take(1)
         .collect::<Vec<_>>();
 
@@ -112,14 +112,17 @@ pub async fn create_connection(
     .await;
 
     let (connection_id_b, connection_id_a) = match events.pop() {
-        Some(IbcEvent::OpenConfirmConnection(conn)) => (
-            conn.connection_id().unwrap().clone(),
-            conn.attributes()
-                .counterparty_connection_id
-                .as_ref()
-                .unwrap()
-                .clone(),
-        ),
+        Some(ev) => match ev.event {
+            IbcEvent::OpenConfirmConnection(conn) => (
+                conn.connection_id().unwrap().clone(),
+                conn.attributes()
+                    .counterparty_connection_id
+                    .as_ref()
+                    .unwrap()
+                    .clone(),
+            ),
+            _ => panic!("Unexpected event"),
+        },
         got => panic!("Last event should be OpenConfirmConnection: {got:?}"),
     };
 
@@ -153,7 +156,7 @@ pub async fn create_channel(
     let future = chain_b
         .ibc_events()
         .await
-        .skip_while(|ev| future::ready(!matches!(ev, IbcEvent::OpenConfirmChannel(_))))
+        .skip_while(|ev| future::ready(!matches!(ev.event, IbcEvent::OpenConfirmChannel(_))))
         .take(1)
         .collect::<Vec<_>>();
 
@@ -165,10 +168,13 @@ pub async fn create_channel(
     .await;
 
     let (channel_id_a, channel_id_b) = match events.pop() {
-        Some(IbcEvent::OpenConfirmChannel(chan)) => (
-            chan.clone().counterparty_channel_id.unwrap(),
-            chan.channel_id().unwrap().clone(),
-        ),
+        Some(ev) => match ev.event {
+            IbcEvent::OpenConfirmChannel(chan) => (
+                chan.clone().counterparty_channel_id.unwrap(),
+                chan.channel_id().unwrap().clone(),
+            ),
+            _ => panic!("Unexpected event"),
+        },
         got => panic!("Last event should be OpenConfirmChannel: {got:?}"),
     };
 

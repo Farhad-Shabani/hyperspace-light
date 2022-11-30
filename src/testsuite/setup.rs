@@ -1,6 +1,6 @@
 use super::create::{create_channel, create_clients, create_connection};
 use crate::core::primitives::{IbcProvider, TestProvider};
-use crate::core::relay::relay;
+// use crate::core::relay::relay;
 use crate::cosmos::{client::CosmosClient, client::CosmosClientConfig, key_provider::KeyEntry};
 use futures::{future, StreamExt};
 use ibc_relayer_types::events::IbcEvent;
@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 
 pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<H>, CosmosClient<H>)
 {
-    log::info!(target: "demo-relayer", "============================== Starting Test ==============================");
+    log::info!(target: "hyperspace-light", "============================== Starting Test ==============================");
 
     // Create client configurations
     // Parameters have been set up to work with local nodes according to https://hermes.informal.systems/tutorials
@@ -59,52 +59,53 @@ pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<
     let mut chain_b = CosmosClient::<H>::new(config_b).await.unwrap();
 
     // Wait until for cosmos to start producing blocks
-    log::info!(target: "demo-relayer", "Waiting for block production from Cosmos chains");
+    log::info!(target: "hyperspace-light", "Waiting for block production from Cosmos chains");
     let new_block_chain_a = chain_a
         .ibc_events()
         .await
-        .skip_while(|ev| future::ready(!matches!(ev, IbcEvent::NewBlock(_))))
+        .skip_while(|ev| future::ready(!matches!(ev.event, IbcEvent::NewBlock(_))))
         .take(1)
         .collect::<Vec<_>>()
         .await;
-    log::info!(target: "demo-relayer", "Received {:?} events", new_block_chain_a);
+    log::info!(target: "hyperspace-light", "Received {:?} events", new_block_chain_a);
 
     let new_block_chain_b = chain_b
         .ibc_events()
         .await
-        .skip_while(|ev| future::ready(!matches!(ev, IbcEvent::NewBlock(_))))
+        .skip_while(|ev| future::ready(!matches!(ev.event, IbcEvent::NewBlock(_))))
         .take(1)
         .collect::<Vec<_>>()
         .await;
-    log::info!(target: "demo-relayer", "Received {:?} events", new_block_chain_b);
-    log::info!(target: "demo-relayer", "Cosmos chains are ready to go!");
+    log::info!(target: "hyperspace-light", "Received {:?} events", new_block_chain_b);
+    log::info!(target: "hyperspace-light", "Cosmos chains are ready to go!");
 
     // Check if the clients are already created
     let clients_on_a = chain_a.query_clients().await.unwrap();
-    log::info!(target: "demo-relayer", "Clients on chain_a: {:?}", clients_on_a);
+    log::info!(target: "hyperspace-light", "Clients on chain_a: {:?}", clients_on_a);
     let clients_on_b = chain_b.query_clients().await.unwrap();
-    log::info!(target: "demo-relayer", "Clients on chain_b: {:?}", clients_on_b);
+    log::info!(target: "hyperspace-light", "Clients on chain_b: {:?}", clients_on_b);
 
-    // if !clients_on_a.is_empty() && !clients_on_b.is_empty() {
-    //     chain_a.set_client_id(clients_on_b[0].clone());
-    //     chain_b.set_client_id(clients_on_b[0].clone());
-    //     return (chain_a, chain_b);
-    // }
+    if !clients_on_a.is_empty() && !clients_on_b.is_empty() {
+        chain_a.set_client_id(clients_on_b[0].clone());
+        chain_b.set_client_id(clients_on_b[0].clone());
+        return (chain_a, chain_b);
+    }
 
     let height = chain_a.latest_height_and_timestamp().await.unwrap();
-    log::info!(target: "demo-relayer", "Latest height on chain_a: {:?}", height);
+    log::trace!(target: "hyperspace-light", "Latest height on chain_a: {:?}", height);
     let time = chain_a.query_timestamp_at(10).await.unwrap();
-    log::info!(target: "demo-relayer", "Timestamp at height 10 on chain_a: {:?}", time);
+    log::trace!(target: "hyperspace-light", "Timestamp at height 10 on chain_a: {:?}", time);
     let channels = chain_a.query_channels().await.unwrap();
-    log::info!(target: "demo-relayer", "Channels on chain_a: {:?}", channels);
+    log::trace!(target: "hyperspace-light", "Channels on chain_a: {:?}", channels);
 
     let height = chain_b.latest_height_and_timestamp().await.unwrap();
-    log::info!(target: "demo-relayer", "Latest height on chain_b: {:?}", height);
+    log::trace!(target: "hyperspace-light", "Latest height on chain_b: {:?}", height);
     let time = chain_b.query_timestamp_at(10).await.unwrap();
-    log::info!(target: "demo-relayer", "Timestamp at height 10 on chain_b: {:?}", time);
+    log::trace!(target: "hyperspace-light", "Timestamp at height 10 on chain_b: {:?}", time);
     let channels = chain_b.query_channels().await.unwrap();
-    log::info!(target: "demo-relayer", "Channels on chain_b: {:?}", channels);
+    log::trace!(target: "hyperspace-light", "Channels on chain_b: {:?}", channels);
     let (client_a, client_b) = create_clients(&chain_a, &chain_b).await.unwrap();
+    
     chain_a.set_client_id(client_a);
     chain_b.set_client_id(client_b);
     (chain_a, chain_b)
@@ -128,9 +129,9 @@ where
     let client_a_clone = chain_a.clone();
     let client_b_clone = chain_b.clone();
     // Start relayer loop
-    let handle =
-        tokio::task::spawn(async move { relay(client_a_clone, client_b_clone).await.unwrap() });
-        
+    // let handle =
+    //     tokio::task::spawn(async move { relay(client_a_clone, client_b_clone).await.unwrap() });
+
     // check if an open transfer channel exists
     let (latest_height, ..) = chain_a.latest_height_and_timestamp().await.unwrap();
     let connections = chain_a
@@ -140,7 +141,7 @@ where
         )
         .await
         .unwrap();
-    log::info!(target: "demo-relayer", "Connections: {:?}", connections);
+    log::info!(target: "hyperspace-light", "Connections: {:?}", connections);
     for connection in connections {
         let connection_id = ConnectionId::from_str(&connection.id).unwrap();
         let connection_end = chain_a
@@ -160,7 +161,7 @@ where
             .await
             .unwrap()
             .channels;
-        log::info!(target: "demo-relayer", "Channels: {:?}", channels);
+        log::info!(target: "hyperspace-light", "Channels: {:?}", channels);
         for channel in channels {
             let channel_id = ChannelId::from_str(&channel.channel_id).unwrap();
             let channel_end = chain_a
@@ -186,8 +187,8 @@ where
         .await
         .unwrap();
 
-    log::info!(target: "demo-relayer", "============ Connection handshake completed: ConnectionId({connection_id}) ============");
-    log::info!(target: "demo-relayer", "=========================== Starting channel handshake ===========================");
+    log::info!(target: "hyperspace-light", "============ Connection handshake completed: ConnectionId({connection_id}) ============");
+    log::info!(target: "hyperspace-light", "=========================== Starting channel handshake ===========================");
 
     let (channel_id_a, channel_id_b) = create_channel(
         chain_a,
@@ -200,7 +201,7 @@ where
     .await
     .unwrap();
     // channel handshake completed
-    log::info!(target: "demo-relayer", "============ Channel handshake completed: ChannelId({channel_id_a}) ============");
+    log::info!(target: "hyperspace-light", "============ Channel handshake completed: ChannelId({channel_id_a}) ============");
     todo!()
     // (handle, channel_id_a, channel_id_b, connection_id)
 }
