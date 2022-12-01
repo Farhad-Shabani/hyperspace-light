@@ -12,16 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::{error::Error, primitives::Chain};
 use super::packets::query_ready_and_timed_out_packets;
 #[cfg(feature = "testing")]
 use crate::send_packet_relay::packet_relay_status;
+use crate::{
+    core::{error::Error, primitives::Chain},
+    cosmos::events::IbcEventWithHeight,
+};
 use codec::Encode;
+use ibc_proto::protobuf::Protobuf;
+use ibc_proto::{google::protobuf::Any, ibc::core::client::v1::QueryConsensusStateResponse};
 use ibc_relayer_types::{
+    clients::ics07_tendermint::client_state::ClientState,
     core::{
         ics03_connection::{
             connection::{ConnectionEnd, Counterparty},
-            handler::verify::ConsensusProofwithHostConsensusStateProof,
             msgs::{
                 conn_open_ack::MsgConnectionOpenAck, conn_open_confirm::MsgConnectionOpenConfirm,
                 conn_open_try::MsgConnectionOpenTry,
@@ -37,18 +42,11 @@ use ibc_relayer_types::{
         },
         ics23_commitment::commitment::{CommitmentPrefix, CommitmentProofBytes},
     },
-	clients::ics07_tendermint::{
-		client_state::{AllowUpdate, ClientState},
-		consensus_state::ConsensusState,
-		header::Header,
-	},
     events::{IbcEvent, IbcEventType},
     proofs::{ConsensusProof, Proofs},
     tx_msg::Msg,
     Height,
 };
-use ibc_proto::{google::protobuf::Any, ibc::core::client::v1::QueryConsensusStateResponse};
-use tendermint_proto::Protobuf;
 
 /// Connection proof type
 #[derive(Encode)]
@@ -63,18 +61,18 @@ pub struct ConnectionProof {
 pub async fn parse_events(
     source: &mut impl Chain,
     sink: &mut impl Chain,
-    events: Vec<IbcEvent>,
+    events: Vec<IbcEventWithHeight>,
 ) -> Result<(Vec<Any>, Vec<Any>), anyhow::Error> {
     let mut messages = vec![];
     // 1. translate events to messages
-    for event in events {
-        match event {
+    for ev in events {
+        match ev.event {
             IbcEvent::OpenInitConnection(open_init) => {
                 if let Some(connection_id) = open_init.connection_id() {
                     let connection_id = connection_id.clone();
                     // Get connection end with proof
                     let connection_response = source
-                        .query_connection_end(open_init.height(), connection_id.clone())
+                        .query_connection_end(ev.height, connection_id.clone())
                         .await?;
                     let connection_end = ConnectionEnd::try_from(
                         connection_response.connection.ok_or_else(|| {
@@ -90,25 +88,28 @@ pub async fn parse_events(
                         CommitmentProofBytes::try_from(connection_response.proof)?;
                     let prefix: CommitmentPrefix = source.connection_prefix();
                     let client_state_response = source
-                        .query_client_state(
-                            open_init.height(),
-                            open_init.attributes().client_id.clone(),
-                        )
+                        .query_client_state(ev.height, open_init.attributes().client_id.clone())
                         .await?;
 
                     let proof_height = connection_response.proof_height.ok_or_else(|| Error::Custom(format!("[get_messages_for_events - open_conn_init] Proof height not found in response")))?;
                     let proof_height =
-                        Height::new(proof_height.revision_number, proof_height.revision_height);
+                        Height::new(proof_height.revision_number, proof_height.revision_height)
+                            .map_err(|e| {
+                                Error::Custom(format!(
+                            "[get_messages_for_events - open_conn_init] Invalid proof height: {:?}",
+                            e
+                        ))
+                            })?;
                     let client_state_proof =
                         CommitmentProofBytes::try_from(client_state_response.proof).ok();
 
                     let client_state = client_state_response
                         .client_state
-                        .map(AnyClientState::try_from)
+                        .map(ClientState::try_from)
                         .ok_or_else(|| Error::Custom(format!("Client state is empty")))??;
                     let consensus_proof = source
                         .query_client_consensus(
-                            open_init.height(),
+                            ev.height,
                             open_init.attributes().client_id.clone(),
                             client_state.latest_height(),
                         )
@@ -117,10 +118,11 @@ pub async fn parse_events(
                         query_consensus_proof(sink, client_state.clone(), consensus_proof).await?;
 
                     // Construct OpenTry
-                    let msg = MsgConnectionOpenTry::<LocalClientTypes> {
+                    let msg = MsgConnectionOpenTry {
+                        previous_connection_id: None,
                         client_id: counterparty.client_id().clone(),
                         // client state proof is mandatory in conn_open_try
-                        client_state: Some(client_state.clone()),
+                        client_state: Some(client_state.clone().into()),
                         counterparty: Counterparty::new(
                             open_init.attributes().client_id.clone(),
                             Some(connection_id),
@@ -141,7 +143,12 @@ pub async fn parse_events(
                         signer: sink.account_id(),
                     };
 
-                    let value = msg.encode_vec();
+                    let value = msg.encode_vec().map_err(|e| {
+                        Error::Custom(format!(
+                            "[get_messages_for_events - open_conn_init] Error encoding message: {:?}",
+                            e
+                        ))
+                    })?;
                     let msg = Any {
                         value,
                         type_url: msg.type_url(),
@@ -154,7 +161,7 @@ pub async fn parse_events(
                     let connection_id = connection_id.clone();
                     // Get connection end with proof
                     let connection_response = source
-                        .query_connection_end(open_try.height(), connection_id.clone())
+                        .query_connection_end(ev.height, connection_id.clone())
                         .await?;
                     let connection_end = ConnectionEnd::try_from(
                         connection_response.connection.ok_or_else(|| {
@@ -169,24 +176,27 @@ pub async fn parse_events(
                     let connection_proof =
                         CommitmentProofBytes::try_from(connection_response.proof)?;
                     let client_state_response = source
-                        .query_client_state(
-                            open_try.height(),
-                            open_try.attributes().client_id.clone(),
-                        )
+                        .query_client_state(ev.height, open_try.attributes().client_id.clone())
                         .await?;
 
                     let proof_height = connection_response.proof_height.ok_or_else(|| Error::Custom(format!("[get_messages_for_events - open_conn_try] Proof height not found in response")))?;
                     let proof_height =
-                        Height::new(proof_height.revision_number, proof_height.revision_height);
+                        Height::new(proof_height.revision_number, proof_height.revision_height)
+                            .map_err(|e| {
+                                Error::Custom(format!(
+                            "[get_messages_for_events - open_conn_try] Invalid proof height: {:?}",
+                            e
+                        ))
+                            })?;
                     let client_state_proof =
                         CommitmentProofBytes::try_from(client_state_response.proof).ok();
                     let client_state = client_state_response
                         .client_state
-                        .map(AnyClientState::try_from)
+                        .map(ClientState::try_from)
                         .ok_or_else(|| Error::Custom(format!("Client state is empty")))??;
                     let consensus_proof = source
                         .query_client_consensus(
-                            open_try.height(),
+                            ev.height,
                             open_try.attributes().client_id.clone(),
                             client_state.latest_height(),
                         )
@@ -194,7 +204,7 @@ pub async fn parse_events(
                     let consensus_proof =
                         query_consensus_proof(sink, client_state.clone(), consensus_proof).await?;
                     // Construct OpenAck
-                    let msg = MsgConnectionOpenAck::<LocalClientTypes> {
+                    let msg = MsgConnectionOpenAck {
 						connection_id: counterparty
 							.connection_id()
 							.ok_or_else(|| {
@@ -202,7 +212,7 @@ pub async fn parse_events(
 							})?
 							.clone(),
 						counterparty_connection_id: connection_id,
-						client_state: Some(client_state.clone()),
+						client_state: Some(client_state.clone().into()),
 						proofs: Proofs::new(
 							connection_proof,
 							client_state_proof,
@@ -226,7 +236,12 @@ pub async fn parse_events(
 						signer: sink.account_id(),
 					};
 
-                    let value = msg.encode_vec();
+                    let value = msg.encode_vec().map_err(|e| {
+                        Error::Custom(format!(
+                            "[get_messages_for_events - open_conn_try] Error encoding message: {:?}",
+                            e
+                        ))
+                    })?;
                     let msg = Any {
                         value,
                         type_url: msg.type_url(),
@@ -239,7 +254,7 @@ pub async fn parse_events(
                     let connection_id = connection_id.clone();
                     // Get connection end with proof
                     let connection_response = source
-                        .query_connection_end(open_ack.height(), connection_id.clone())
+                        .query_connection_end(ev.height, connection_id.clone())
                         .await?;
                     let connection_end = ConnectionEnd::try_from(
                         connection_response.connection.ok_or_else(|| {
@@ -258,7 +273,13 @@ pub async fn parse_events(
 						Error::Custom(format!("[get_messages_for_events - open_conn_ack] Proof height not found in response"))
 					})?;
                     let proof_height =
-                        Height::new(proof_height.revision_number, proof_height.revision_height);
+                        Height::new(proof_height.revision_number, proof_height.revision_height)
+                            .map_err(|e| {
+                                Error::Custom(format!(
+                            "[get_messages_for_events - open_conn_ack] Invalid proof height: {:?}",
+                            e
+                        ))
+                            })?;
 
                     // Construct OpenConfirm
                     let msg = MsgConnectionOpenConfirm {
@@ -273,7 +294,12 @@ pub async fn parse_events(
 						signer: sink.account_id(),
 					};
 
-                    let value = msg.encode_vec();
+                    let value = msg.encode_vec().map_err(|e| {
+                        Error::Custom(format!(
+                            "[get_messages_for_events - open_conn_ack] Error encoding message: {:?}",
+                            e
+                        ))
+                    })?;
                     let msg = Any {
                         value,
                         type_url: msg.type_url(),
@@ -284,19 +310,13 @@ pub async fn parse_events(
             IbcEvent::OpenInitChannel(open_init) => {
                 if let Some(channel_id) = open_init.channel_id {
                     let channel_response = source
-                        .query_channel_end(
-                            open_init.height(),
-                            channel_id,
-                            open_init.port_id.clone(),
-                        )
+                        .query_channel_end(ev.height, channel_id.clone(), open_init.port_id.clone())
                         .await?;
                     let channel_end =
                         ChannelEnd::try_from(channel_response.channel.ok_or_else(|| {
                             Error::Custom(format!(
-								"[get_messages_for_events - open_chan_init] ChannelEnd not found for {:?}/{:?}",
-								channel_id,
-								open_init.port_id.clone()
-							))
+                                "[get_messages_for_events - open_chan_init] ChannelEnd not found"
+                            ))
                         })?)
                         .expect("Channel end decoding should not fail");
                     let counterparty = channel_end.counterparty();
@@ -316,9 +336,16 @@ pub async fn parse_events(
                         "[get_messages_for_events - open_chan_init]Proof height should be present",
                     );
                     let proof_height =
-                        Height::new(proof_height.revision_number, proof_height.revision_height);
+                        Height::new(proof_height.revision_number, proof_height.revision_height)
+                            .map_err(|e| {
+                                Error::Custom(format!(
+                            "[get_messages_for_events - open_chan_init] Invalid proof height: {:?}",
+                            e
+                        ))
+                            })?;
 
                     let msg = MsgChannelOpenTry {
+                        previous_channel_id: None,
                         port_id: counterparty.port_id.clone(),
                         channel,
                         counterparty_version: channel_end.version,
@@ -327,7 +354,12 @@ pub async fn parse_events(
                         signer: sink.account_id(),
                     };
 
-                    let value = msg.encode_vec();
+                    let value = msg.encode_vec().map_err(|e| {
+                        Error::Custom(format!(
+                            "[get_messages_for_events - open_chan_init] Error encoding message: {:?}",
+                            e
+                        ))
+                    })?;
                     let msg = Any {
                         value,
                         type_url: msg.type_url(),
@@ -338,24 +370,29 @@ pub async fn parse_events(
             IbcEvent::OpenTryChannel(open_try) => {
                 if let Some(channel_id) = open_try.channel_id {
                     let channel_response = source
-                        .query_channel_end(open_try.height(), channel_id, open_try.port_id.clone())
+                        .query_channel_end(ev.height, channel_id.clone(), open_try.port_id.clone())
                         .await?;
                     let channel_end =
                         ChannelEnd::try_from(channel_response.channel.ok_or_else(|| {
                             Error::Custom(format!(
-								"[get_messages_for_events - open_chan_try] ChannelEnd not found for {:?}/{:?}",
-								channel_id, open_try.port_id
-							))
+                                "[get_messages_for_events - open_chan_try] ChannelEnd not found"
+                            ))
                         })?)
                         .expect("Channel end decoding should not fail");
-                    let counterparty = channel_end.counterparty();
+                    let counterparty = channel_end.counterparty().clone();
                     let channel_proof = CommitmentProofBytes::try_from(channel_response.proof)?;
 
                     let proof_height = channel_response.proof_height.expect(
                         "[get_messages_for_events - open_chan_try] Proof height should be present",
                     );
                     let proof_height =
-                        Height::new(proof_height.revision_number, proof_height.revision_height);
+                        Height::new(proof_height.revision_number, proof_height.revision_height)
+                            .map_err(|e| {
+                                Error::Custom(format!(
+                            "[get_messages_for_events - open_chan_try] Invalid proof height: {:?}",
+                            e
+                        ))
+                            })?;
 
                     let msg = MsgChannelOpenAck {
                         port_id: counterparty.port_id.clone(),
@@ -369,7 +406,12 @@ pub async fn parse_events(
                         signer: sink.account_id(),
                     };
 
-                    let value = msg.encode_vec();
+                    let value = msg.encode_vec().map_err(|e| {
+                        Error::Custom(format!(
+                            "[get_messages_for_events - open_chan_try] Error encoding message: {:?}",
+                            e
+                        ))
+                    })?;
                     let msg = Any {
                         value,
                         type_url: msg.type_url(),
@@ -380,23 +422,28 @@ pub async fn parse_events(
             IbcEvent::OpenAckChannel(open_ack) => {
                 if let Some(channel_id) = open_ack.channel_id {
                     let channel_response = source
-                        .query_channel_end(open_ack.height(), channel_id, open_ack.port_id.clone())
+                        .query_channel_end(ev.height, channel_id, open_ack.port_id.clone())
                         .await?;
                     let channel_end =
                         ChannelEnd::try_from(channel_response.channel.ok_or_else(|| {
                             Error::Custom(format!(
-								"[get_messages_for_events - open_chan_ack] ChannelEnd not found for {:?}/{:?}",
-								channel_id, open_ack.port_id
-							))
+                                "[get_messages_for_events - open_chan_ack] ChannelEnd not found"
+                            ))
                         })?)?;
-                    let counterparty = channel_end.counterparty();
+                    let counterparty = channel_end.counterparty().clone();
                     let channel_proof = CommitmentProofBytes::try_from(channel_response.proof)?;
 
                     let proof_height = channel_response
                         .proof_height
                         .expect("Proof height should be present");
                     let proof_height =
-                        Height::new(proof_height.revision_number, proof_height.revision_height);
+                        Height::new(proof_height.revision_number, proof_height.revision_height)
+                            .map_err(|e| {
+                                Error::Custom(format!(
+                            "[get_messages_for_events - open_chan_ack] Invalid proof height: {:?}",
+                            e
+                        ))
+                            })?;
 
                     let msg = MsgChannelOpenConfirm {
                         port_id: counterparty.port_id.clone(),
@@ -408,7 +455,12 @@ pub async fn parse_events(
                         signer: sink.account_id(),
                     };
 
-                    let value = msg.encode_vec();
+                    let value = msg.encode_vec().map_err(|e| {
+                        Error::Custom(format!(
+                            "[get_messages_for_events - open_chan_ack] Error encoding message: {:?}",
+                            e
+                        ))
+                    })?;
                     let msg = Any {
                         value,
                         type_url: msg.type_url(),
@@ -419,23 +471,28 @@ pub async fn parse_events(
             IbcEvent::CloseInitChannel(close_init) => {
                 let channel_id = close_init.channel_id;
                 let channel_response = source
-                    .query_channel_end(close_init.height(), channel_id, close_init.port_id.clone())
+                    .query_channel_end(ev.height, channel_id, close_init.port_id.clone())
                     .await?;
                 let channel_end =
                     ChannelEnd::try_from(channel_response.channel.ok_or_else(|| {
                         Error::Custom(format!(
-							"[get_messages_for_events - close_chan_init] ChannelEnd not found for {:?}/{:?}",
-							channel_id, close_init.port_id
-						))
+                            "[get_messages_for_events - close_chan_init] ChannelEnd not found"
+                        ))
                     })?)?;
-                let counterparty = channel_end.counterparty();
+                let counterparty = channel_end.counterparty().clone();
                 let channel_proof = CommitmentProofBytes::try_from(channel_response.proof)?;
 
                 let proof_height = channel_response
                     .proof_height
                     .expect("Proof height should be present");
                 let proof_height =
-                    Height::new(proof_height.revision_number, proof_height.revision_height);
+                    Height::new(proof_height.revision_number, proof_height.revision_height)
+                        .map_err(|e| {
+                            Error::Custom(format!(
+                        "[get_messages_for_events - close_chan_init] Invalid proof height: {:?}",
+                        e
+                    ))
+                        })?;
 
                 let msg = MsgChannelCloseConfirm {
                     port_id: counterparty.port_id.clone(),
@@ -447,7 +504,12 @@ pub async fn parse_events(
                     signer: sink.account_id(),
                 };
 
-                let value = msg.encode_vec();
+                let value = msg.encode_vec().map_err(|e| {
+                    Error::Custom(format!(
+                        "[get_messages_for_events - close_chan_init] Error encoding message: {:?}",
+                        e
+                    ))
+                })?;
                 let msg = Any {
                     value,
                     type_url: msg.type_url(),
@@ -466,7 +528,7 @@ pub async fn parse_events(
                 let port_id = send_packet.packet.source_port.clone();
                 let channel_id = send_packet.packet.source_channel.clone();
                 let channel_response = source
-                    .query_channel_end(send_packet.height, channel_id, port_id.clone())
+                    .query_channel_end(ev.height, channel_id.clone(), port_id.clone())
                     .await?;
                 let channel_end =
                     ChannelEnd::try_from(channel_response.channel.ok_or_else(|| {
@@ -480,7 +542,7 @@ pub async fn parse_events(
                     .ok_or_else(|| Error::Custom("Channel end missing connection id".to_string()))?
                     .clone();
                 let connection_response = source
-                    .query_connection_end(send_packet.height, connection_id.clone())
+                    .query_connection_end(ev.height, connection_id.clone())
                     .await?;
                 let connection_end =
                     ConnectionEnd::try_from(connection_response.connection.ok_or_else(|| {
@@ -493,7 +555,7 @@ pub async fn parse_events(
                 let seq = u64::from(send_packet.packet.sequence);
                 let packet = send_packet.packet;
                 let packet_commitment_response = source
-                    .query_packet_commitment(send_packet.height, &port_id, &channel_id, seq)
+                    .query_packet_commitment(ev.height, &port_id, &channel_id, seq)
                     .await?;
                 let commitment_proof =
                     CommitmentProofBytes::try_from(packet_commitment_response.proof)?;
@@ -502,14 +564,25 @@ pub async fn parse_events(
                     .proof_height
                     .expect("Proof height should be present");
                 let proof_height =
-                    Height::new(proof_height.revision_number, proof_height.revision_height);
+                    Height::new(proof_height.revision_number, proof_height.revision_height)
+                        .map_err(|e| {
+                            Error::Custom(format!(
+                            "[get_messages_for_events - send_packet] Invalid proof height: {:?}",
+                            e
+                        ))
+                        })?;
                 let msg = MsgRecvPacket {
                     packet: packet.clone(),
                     proofs: Proofs::new(commitment_proof, None, None, None, proof_height)?,
                     signer: sink.account_id(),
                 };
 
-                let value = msg.encode_vec();
+                let value = msg.encode_vec().map_err(|e| {
+                    Error::Custom(format!(
+                        "[get_messages_for_events - send_packet] Error encoding message: {:?}",
+                        e
+                    ))
+                })?;
                 let msg = Any {
                     value,
                     type_url: msg.type_url(),
@@ -520,7 +593,7 @@ pub async fn parse_events(
                 let port_id = &write_ack.packet.source_port.clone();
                 let channel_id = &write_ack.packet.source_channel.clone();
                 let channel_response = source
-                    .query_channel_end(write_ack.height, channel_id.clone(), port_id.clone())
+                    .query_channel_end(ev.height, channel_id.clone(), port_id.clone())
                     .await?;
                 let channel_end =
                     ChannelEnd::try_from(channel_response.channel.ok_or_else(|| {
@@ -534,7 +607,7 @@ pub async fn parse_events(
                     .ok_or_else(|| Error::Custom("Channel end missing connection id".to_string()))?
                     .clone();
                 let connection_response = source
-                    .query_connection_end(write_ack.height, connection_id.clone())
+                    .query_connection_end(ev.height, connection_id.clone())
                     .await?;
                 let connection_end =
                     ConnectionEnd::try_from(connection_response.connection.ok_or_else(|| {
@@ -547,7 +620,7 @@ pub async fn parse_events(
                 let seq = u64::from(write_ack.packet.sequence);
                 let packet = write_ack.packet;
                 let packet_acknowledgement_response = source
-                    .query_packet_acknowledgement(write_ack.height, &port_id, &channel_id, seq)
+                    .query_packet_acknowledgement(ev.height, &port_id, &channel_id, seq)
                     .await?;
                 let acknowledgement = write_ack.ack;
                 let commitment_proof =
@@ -557,16 +630,34 @@ pub async fn parse_events(
                     .proof_height
                     .expect("Proof height should be present");
                 let proof_height =
-                    Height::new(proof_height.revision_number, proof_height.revision_height);
+                    Height::new(proof_height.revision_number, proof_height.revision_height)
+                        .map_err(|e| {
+                            Error::Custom(format!(
+                                "[get_messages_for_events - write_ack] Invalid proof height: {:?}",
+                                e
+                            ))
+                        })?;
                 let msg = MsgAcknowledgement {
                     packet,
                     acknowledgement: acknowledgement.into(),
-                    proofs: Proofs::new(commitment_proof, None, None, None, proof_height)?,
+                    proofs: Proofs::new(commitment_proof, None, None, None, proof_height).map_err(
+                        |e| {
+                            Error::Custom(format!(
+                                "[get_messages_for_events - write_ack] Invalid proof height: {:?}",
+                                e
+                            ))
+                        },
+                    )?,
 
                     signer: sink.account_id(),
                 };
 
-                let value = msg.encode_vec();
+                let value = msg.encode_vec().map_err(|e| {
+                    Error::Custom(format!(
+                        "[get_messages_for_events - write_ack] Error encoding message: {:?}",
+                        e
+                    ))
+                })?;
                 let msg = Any {
                     value,
                     type_url: msg.type_url(),
@@ -588,24 +679,11 @@ pub async fn parse_events(
 /// Fetch the connection proof for the sink chain.
 async fn query_consensus_proof(
     sink: &impl Chain,
-    client_state: AnyClientState,
+    _client_state: ClientState,
     consensus_proof: QueryConsensusStateResponse,
 ) -> Result<Vec<u8>, anyhow::Error> {
-    let client_type = sink.client_type();
-    let consensus_proof_bytes = if !client_type.contains("tendermint") {
-        let host_consensus_state_proof = sink
-            .query_host_consensus_state_proof(client_state.latest_height())
-            .await?
-            .expect("Host chain requires consensus state proof; qed");
-        ConsensusProofwithHostConsensusStateProof {
-            host_consensus_state_proof,
-            consensus_proof: consensus_proof.proof,
-        }
-        .encode()
-    } else {
-        consensus_proof.proof
-    };
-
+    let _client_type = sink.client_type();
+    let consensus_proof_bytes = consensus_proof.proof;
     Ok(consensus_proof_bytes)
 }
 

@@ -4,12 +4,14 @@ use super::events::{
     ibc_event_try_from_abci_event, IbcEventWithHeight,
 };
 use crate::core::error::Error;
+use crate::core::packets::types::PacketInfo;
 use crate::core::primitives::{Chain, IbcProvider, UpdateType};
 use core::time::Duration;
 use futures::{
     stream::{self, select_all},
     Stream, StreamExt,
 };
+use ibc_proto::ibc::core::commitment::v1::MerklePath;
 use ibc_proto::{
     google::protobuf::Any,
     ibc::core::{
@@ -45,6 +47,7 @@ use ibc_relayer_types::{
         },
     },
     events::IbcEvent,
+    timestamp::Timestamp,
     Height,
 };
 
@@ -58,7 +61,7 @@ use tendermint_rpc::{
     query::{EventType, Query},
     Client, Error as RpcError, Order, SubscriptionClient, WebSocketClient,
 };
-use tonic::{metadata::AsciiMetadataValue, transport::Channel};
+use tonic::metadata::AsciiMetadataValue;
 pub enum FinalityEvent {
     Tendermint(Header),
 }
@@ -80,14 +83,14 @@ where
         &mut self,
         finality_event: Self::FinalityEvent,
         counterparty: &C,
-    ) -> Result<(Any, Vec<IbcEvent>, UpdateType), anyhow::Error>
+    ) -> Result<(Any, Vec<IbcEventWithHeight>, UpdateType), anyhow::Error>
     where
         C: Chain,
     {
         todo!()
     }
 
-    // Changed result: `Item =` from `IbcEvent` to `IbcEventWithHeight` to include the necessary height field, 
+    // Changed result: `Item =` from `IbcEvent` to `IbcEventWithHeight` to include the necessary height field,
     // as `height` is removed from `Attribute` from ibc-rs v0.22.0
     async fn ibc_events(&self) -> Pin<Box<dyn Stream<Item = IbcEventWithHeight>>> {
         // Create websocket client. Like what `EventMonitor::subscribe()` does in `hermes`
@@ -253,7 +256,7 @@ where
         })
     }
 
-    async fn query_proof(&self, at: Height, keys: Vec<Vec<u8>>) -> Result<Vec<u8>, Self::Error> {
+    async fn query_proof(&self, at: Height, keys: MerklePath) -> Result<Vec<u8>, Self::Error> {
         todo!()
     }
 
@@ -296,7 +299,7 @@ where
         todo!()
     }
 
-    async fn latest_height_and_timestamp(&self) -> Result<(Height, Time), Self::Error> {
+    async fn latest_height_and_timestamp(&self) -> Result<(Height, Timestamp), Self::Error> {
         let response = self
             .rpc_client
             .status()
@@ -396,7 +399,7 @@ where
         channel_id: ChannelId,
         port_id: PortId,
         seqs: Vec<u64>,
-    ) -> Result<Vec<u8>, Self::Error> {
+    ) -> Result<Vec<PacketInfo>, Self::Error> {
         todo!()
     }
 
@@ -405,7 +408,7 @@ where
         channel_id: ChannelId,
         port_id: PortId,
         seqs: Vec<u64>,
-    ) -> Result<Vec<u8>, Self::Error> {
+    ) -> Result<Vec<PacketInfo>, Self::Error> {
         todo!()
     }
 
@@ -448,7 +451,7 @@ where
         todo!()
     }
 
-    async fn query_timestamp_at(&self, block_number: u64) -> Result<Time, Self::Error> {
+    async fn query_timestamp_at(&self, block_number: u64) -> Result<u64, Self::Error> {
         let height = TmHeight::try_from(block_number)
             .map_err(|e| Error::from(format!("Invalid block number: {}", e)))?;
         let response = self
@@ -456,8 +459,8 @@ where
             .block(height)
             .await
             .map_err(|e| Error::RpcError(e.to_string()))?;
-        let time = response.block.header.time;
-        Ok(time)
+        let time: Timestamp = response.block.header.time.into();
+        Ok(time.nanoseconds())
     }
 
     async fn query_clients(&self) -> Result<Vec<ClientId>, Self::Error> {

@@ -21,7 +21,7 @@ macro_rules! process_finality_event {
                         continue;
                     }
                 };
-                let event_types = events.iter().map(|ev| ev.event_type()).collect::<Vec<_>>();
+                let event_types = events.iter().map(|ev| ev.event.event_type()).collect::<Vec<_>>();
                 let (mut messages, timeouts) =
                     crate::core::events::parse_events(&mut $source, &mut $sink, events).await?;
                 if !timeouts.is_empty() {

@@ -1,6 +1,6 @@
 use super::create::{create_channel, create_clients, create_connection};
 use crate::core::primitives::{IbcProvider, TestProvider};
-// use crate::core::relay::relay;
+use crate::core::relay::relay;
 use crate::cosmos::{client::CosmosClient, client::CosmosClientConfig, key_provider::KeyEntry};
 use futures::{future, StreamExt};
 use ibc_relayer_types::events::IbcEvent;
@@ -92,18 +92,18 @@ pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<
     }
 
     let height = chain_a.latest_height_and_timestamp().await.unwrap();
-    log::trace!(target: "hyperspace-light", "Latest height on chain_a: {:?}", height);
+    log::info!(target: "hyperspace-light", "Latest height on chain_a: {:?}", height);
     let time = chain_a.query_timestamp_at(10).await.unwrap();
-    log::trace!(target: "hyperspace-light", "Timestamp at height 10 on chain_a: {:?}", time);
+    log::info!(target: "hyperspace-light", "Timestamp at height 10 on chain_a: {:?}", time);
     let channels = chain_a.query_channels().await.unwrap();
-    log::trace!(target: "hyperspace-light", "Channels on chain_a: {:?}", channels);
+    log::info!(target: "hyperspace-light", "Channels on chain_a: {:?}", channels);
 
     let height = chain_b.latest_height_and_timestamp().await.unwrap();
-    log::trace!(target: "hyperspace-light", "Latest height on chain_b: {:?}", height);
+    log::info!(target: "hyperspace-light", "Latest height on chain_b: {:?}", height);
     let time = chain_b.query_timestamp_at(10).await.unwrap();
-    log::trace!(target: "hyperspace-light", "Timestamp at height 10 on chain_b: {:?}", time);
+    log::info!(target: "hyperspace-light", "Timestamp at height 10 on chain_b: {:?}", time);
     let channels = chain_b.query_channels().await.unwrap();
-    log::trace!(target: "hyperspace-light", "Channels on chain_b: {:?}", channels);
+    log::info!(target: "hyperspace-light", "Channels on chain_b: {:?}", channels);
     let (client_a, client_b) = create_clients(&chain_a, &chain_b).await.unwrap();
     
     chain_a.set_client_id(client_a);
@@ -129,8 +129,8 @@ where
     let client_a_clone = chain_a.clone();
     let client_b_clone = chain_b.clone();
     // Start relayer loop
-    // let handle =
-    //     tokio::task::spawn(async move { relay(client_a_clone, client_b_clone).await.unwrap() });
+    let handle =
+        tokio::task::spawn(async move { relay(client_a_clone, client_b_clone).await.unwrap() });
 
     // check if an open transfer channel exists
     let (latest_height, ..) = chain_a.latest_height_and_timestamp().await.unwrap();

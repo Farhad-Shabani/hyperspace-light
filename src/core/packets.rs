@@ -21,14 +21,15 @@ use super::primitives::{
     find_suitable_proof_height_for_client, packet_info_to_packet, query_undelivered_acks,
     query_undelivered_sequences, Chain,
 };
+use ibc_proto::google::protobuf::Any;
 use ibc_relayer_types::{
+    clients::ics07_tendermint::client_state::ClientState,
     core::{
         ics03_connection::connection::ConnectionEnd,
         ics04_channel::channel::{ChannelEnd, State},
     },
     Height,
 };
-use ibc_proto::google::protobuf::Any;
 use utils::{
     construct_ack_message, construct_recv_message, construct_timeout_message,
     get_timeout_proof_height, verify_delay_passed, VerifyDelayOn,
@@ -48,16 +49,13 @@ pub async fn query_ready_and_timed_out_packets(
 
     for (channel_id, port_id) in channel_whitelist {
         let source_channel_response = source
-            .query_channel_end(source_height, channel_id, port_id.clone())
+            .query_channel_end(source_height, channel_id.clone(), port_id.clone())
             .await?;
-        let source_channel_end =
-            ChannelEnd::try_from(source_channel_response.channel.ok_or_else(|| {
-                Error::Custom(format!(
-                    "ChannelEnd not found for {:?}/{:?}",
-                    channel_id,
-                    port_id.clone()
-                ))
-            })?)?;
+        let source_channel_end = ChannelEnd::try_from(
+            source_channel_response
+                .channel
+                .ok_or_else(|| Error::Custom(format!("ChannelEnd not found")))?,
+        )?;
         // we're only interested in open or closed channels
         if !matches!(source_channel_end.state, State::Open | State::Closed) {
             continue;
@@ -80,6 +78,7 @@ pub async fn query_ready_and_timed_out_packets(
 
         let sink_channel_id = source_channel_end
             .counterparty()
+            .clone()
             .channel_id
             .ok_or_else(|| {
                 Error::Custom(
@@ -89,7 +88,7 @@ pub async fn query_ready_and_timed_out_packets(
             .clone();
         let sink_port_id = source_channel_end.counterparty().port_id.clone();
         let sink_channel_response = sink
-            .query_channel_end(sink_height, sink_channel_id, sink_port_id.clone())
+            .query_channel_end(sink_height, sink_channel_id.clone(), sink_port_id.clone())
             .await?;
 
         let sink_channel_end =
@@ -106,42 +105,40 @@ pub async fn query_ready_and_timed_out_packets(
         let source_client_state_on_sink = sink
             .query_client_state(sink_height, source.client_id())
             .await?;
-        let source_client_state_on_sink = AnyClientState::try_from(
-            source_client_state_on_sink.client_state.ok_or_else(|| {
+        let source_client_state_on_sink =
+            ClientState::try_from(source_client_state_on_sink.client_state.ok_or_else(|| {
                 Error::Custom(format!(
                     "Client state for {} should exist on {}",
                     source.name(),
                     sink.name()
                 ))
-            })?,
-        )
-        .map_err(|_| {
-            Error::Custom(format!(
-                "Invalid Client state for {} should found on {}",
-                source.name(),
-                sink.name()
-            ))
-        })?;
+            })?)
+            .map_err(|_| {
+                Error::Custom(format!(
+                    "Invalid Client state for {} should found on {}",
+                    source.name(),
+                    sink.name()
+                ))
+            })?;
 
         let sink_client_state_on_source = sink
             .query_client_state(sink_height, source.client_id())
             .await?;
-        let sink_client_state_on_source = AnyClientState::try_from(
-            sink_client_state_on_source.client_state.ok_or_else(|| {
+        let sink_client_state_on_source =
+            ClientState::try_from(sink_client_state_on_source.client_state.ok_or_else(|| {
                 Error::Custom(format!(
                     "Client state for {} should exist on {}",
                     source.name(),
                     sink.name()
                 ))
-            })?,
-        )
-        .map_err(|_| {
-            Error::Custom(format!(
-                "Invalid Client state for {} should found on {}",
-                source.name(),
-                sink.name()
-            ))
-        })?;
+            })?)
+            .map_err(|_| {
+                Error::Custom(format!(
+                    "Invalid Client state for {} should found on {}",
+                    source.name(),
+                    sink.name()
+                ))
+            })?;
         let latest_sink_height_on_source = sink_client_state_on_source.latest_height();
         let latest_source_height_on_sink = source_client_state_on_sink.latest_height();
 
@@ -149,7 +146,7 @@ pub async fn query_ready_and_timed_out_packets(
         let seqs = query_undelivered_sequences(
             source_height,
             sink_height,
-            channel_id,
+            channel_id.clone(),
             port_id.clone(),
             source,
             sink,
@@ -157,7 +154,7 @@ pub async fn query_ready_and_timed_out_packets(
         .await?;
 
         let send_packets = source
-            .query_send_packets(channel_id, port_id.clone(), seqs)
+            .query_send_packets(channel_id.clone(), port_id.clone(), seqs)
             .await?;
         for send_packet in send_packets {
             let packet = packet_info_to_packet(&send_packet);
@@ -231,7 +228,7 @@ pub async fn query_ready_and_timed_out_packets(
             // If sink does not have a client height that is equal to or greater than the packet
             // creation height, we can't send it yet, packet_info.height should represent the packet
             // creation height on source chain
-            if send_packet.height > latest_source_height_on_sink.revision_height {
+            if send_packet.height > latest_source_height_on_sink.revision_height() {
                 // Sink does not have client update required to prove recv packet message
                 continue;
             }
@@ -241,9 +238,16 @@ pub async fn query_ready_and_timed_out_packets(
                 sink_height,
                 source.client_id(),
                 Height::new(
-                    latest_source_height_on_sink.revision_number,
+                    latest_source_height_on_sink.revision_number(),
                     send_packet.height,
-                ),
+                )
+                .map_err(|_| {
+                    Error::Custom(format!(
+                        "Invalid proof height for packet {}",
+                        send_packet.sequence
+                    ))
+                })
+                .unwrap(),
                 None,
                 latest_source_height_on_sink,
             )
@@ -278,7 +282,7 @@ pub async fn query_ready_and_timed_out_packets(
         let acks = query_undelivered_acks(
             source_height,
             sink_height,
-            channel_id,
+            channel_id.clone(),
             port_id.clone(),
             source,
             sink,
@@ -302,7 +306,7 @@ pub async fn query_ready_and_timed_out_packets(
             // If sink does not have a client height that is equal to or greater than the packet
             // creation height, we can't send it yet packet_info.height should represent the
             // acknowledgement creation height on source chain
-            if acknowledgement.height > latest_source_height_on_sink.revision_height {
+            if acknowledgement.height > latest_source_height_on_sink.revision_height() {
                 // Sink does not have client update required to prove acknowledgement packet message
                 continue;
             }
@@ -312,9 +316,16 @@ pub async fn query_ready_and_timed_out_packets(
                 sink_height,
                 source.client_id(),
                 Height::new(
-                    latest_source_height_on_sink.revision_number,
+                    latest_source_height_on_sink.revision_number(),
                     acknowledgement.height,
-                ),
+                )
+                .map_err(|_| {
+                    Error::Custom(format!(
+                        "Invalid proof height for packet {}",
+                        acknowledgement.sequence
+                    ))
+                })
+                .unwrap(),
                 None,
                 latest_source_height_on_sink,
             )
