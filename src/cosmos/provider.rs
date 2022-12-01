@@ -33,7 +33,6 @@ use ibc_relayer_types::{
     clients::ics07_tendermint::{
         client_state::{AllowUpdate, ClientState},
         consensus_state::ConsensusState,
-        header::Header,
     },
     core::{
         ics02_client::{
@@ -50,6 +49,7 @@ use ibc_relayer_types::{
     timestamp::Timestamp,
     Height,
 };
+use tendermint::block::Header;
 
 use std::pin::Pin;
 use std::str::FromStr;
@@ -436,7 +436,7 @@ where
     }
 
     fn connection_prefix(&self) -> CommitmentPrefix {
-        todo!()
+        CommitmentPrefix::try_from(self.commitment_prefix.clone()).expect("Should not fail")
     }
 
     fn client_id(&self) -> ClientId {
@@ -444,11 +444,16 @@ where
     }
 
     fn client_type(&self) -> ClientType {
-        todo!()
+        ClientType::from_str("07-tendermint")
+            .map_err(|e| Error::from(format!("{:?}", e)))
+            .unwrap()
     }
 
     fn connection_id(&self) -> ConnectionId {
-        todo!()
+        self.connection_id
+            .as_ref()
+            .expect("Connection id should be defined")
+            .clone()
     }
 
     async fn query_timestamp_at(&self, block_number: u64) -> Result<u64, Self::Error> {

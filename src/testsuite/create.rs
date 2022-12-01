@@ -151,7 +151,7 @@ pub async fn create_channel(
 
     chain_a.submit(vec![msg.to_any()]).await?;
 
-    log::info!(target: "demo-relayer", "============= Wait till both chains have completed channel handshake =============");
+    log::info!(target: "hyperspace-light", "============= Wait till both chains have completed channel handshake =============");
 
     let future = chain_b
         .ibc_events()

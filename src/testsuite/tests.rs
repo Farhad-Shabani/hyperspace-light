@@ -2,7 +2,7 @@
 use super::create::timeout_future;
 use super::setup::setup_connection_and_channel;
 use crate::core::primitives::TestProvider;
-// use crate::core::relay::relay;
+use crate::core::relay::relay;
 use futures::{future, StreamExt};
 use ibc_relayer_types::{
     applications::transfer::{msgs::transfer::MsgTransfer, Amount, PrefixedCoin},
@@ -34,8 +34,8 @@ where
     chain_b.set_channel_whitelist(vec![(channel_b, PortId::transfer())]);
     let client_a_clone = chain_a.clone();
     let client_b_clone = chain_b.clone();
-    // let handle =
-    //     tokio::task::spawn(async move { relay(client_a_clone, client_b_clone).await.unwrap() });
+    let handle =
+        tokio::task::spawn(async move { relay(client_a_clone, client_b_clone).await.unwrap() });
     send_packet_with_connection_delay(chain_a, chain_b, channel_id).await;
     handle.abort()
 }

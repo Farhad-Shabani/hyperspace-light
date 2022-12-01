@@ -11,5 +11,5 @@ Light version of Hyperspace relayer to test for Cosmos chains
 - Execute test</br>
   
   ```bash
-  cargo test -p demo-relayer --test cosmos_cosmos
+  cargo test -p hyperspace-light --test cosmos_cosmos
   ```

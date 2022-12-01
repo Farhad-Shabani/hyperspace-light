@@ -173,13 +173,12 @@ where
             let channel_end = ChannelEnd::try_from(channel_end.clone()).unwrap();
             if channel_end.state == State::Open && channel.port_id == PortId::transfer().to_string()
             {
-                todo!()
-                // return (
-                //     handle,
-                //     channel_id,
-                //     channel_end.counterparty().channel_id.as_ref().unwrap().clone(),
-                //     channel_end.connection_hops[0].clone(),
-                // );
+                return (
+                    handle,
+                    channel_id,
+                    channel_end.counterparty().channel_id.as_ref().unwrap().clone(),
+                    channel_end.connection_hops[0].clone(),
+                );
             }
         }
     }

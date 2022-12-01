@@ -2,7 +2,8 @@ use super::client::CosmosClient;
 use super::provider::TransactionId;
 use crate::core::error::Error;
 use crate::core::primitives::{Chain, IbcProvider};
-use futures::Stream;
+use crate::cosmos::provider::FinalityEvent;
+use futures::{Stream, StreamExt};
 use ibc_proto::cosmos::base::v1beta1::Coin;
 use ibc_proto::{
     cosmos::tx::v1beta1::{
@@ -14,7 +15,12 @@ use ibc_proto::{
 use k256::ecdsa::{signature::Signer as _, Signature, SigningKey};
 use prost::Message;
 use std::pin::Pin;
-use tendermint_rpc::Client;
+use tendermint_rpc::{
+    event::Event,
+    event::EventData,
+    query::{EventType, Query},
+    Client, Error as RpcError, SubscriptionClient, WebSocketClient,
+};
 
 #[async_trait::async_trait]
 impl<H> Chain for CosmosClient<H>
@@ -36,7 +42,33 @@ where
     async fn finality_notifications(
         &self,
     ) -> Pin<Box<dyn Stream<Item = <Self as IbcProvider>::FinalityEvent> + Send + Sync>> {
-        todo!()
+        let (ws_client, ws_driver) = WebSocketClient::new(self.websocket_url.clone())
+            .await
+            .map_err(|e| Error::from(format!("Web Socket Client Error {:?}", e)))
+            .unwrap();
+        tokio::spawn(ws_driver.run());
+        let subscription = ws_client
+            .subscribe(Query::from(EventType::NewBlock))
+            .await
+            .map_err(|e| Error::from(format!("failed to subscribe to new blocks {:?}", e)))
+            .unwrap();
+
+        let stream = subscription.filter_map(|event| {
+            let Event {
+                data,
+                events,
+                query,
+            } = event
+                .map_err(|e| Error::from(format!("failed to get event {:?}", e)))
+                .unwrap();
+            let header = match data {
+                EventData::NewBlock { block, .. } => block.unwrap().header,
+                _ => unreachable!(),
+            };
+            futures::future::ready(Some(FinalityEvent::Tendermint(header)))
+        });
+
+        Box::pin(stream)
     }
 
     async fn submit(&self, messages: Vec<Any>) -> Result<Self::TransactionId, Error> {

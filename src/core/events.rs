@@ -66,6 +66,12 @@ pub async fn parse_events(
     let mut messages = vec![];
     // 1. translate events to messages
     for ev in events {
+        log::info!(
+            target: "hyperspace-light",
+            "🔍 Processing event: {:?} at height: {}",
+            ev.event,
+            ev.height
+        );
         match ev.event {
             IbcEvent::OpenInitConnection(open_init) => {
                 if let Some(connection_id) = open_init.connection_id() {

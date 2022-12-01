@@ -13,6 +13,7 @@ where
 	A: Chain,
 	B: Chain,
 {
+	log::info!(target: "hyperspace-light", "🚀🚀 Starting relayer loop");
 	let (mut chain_a_finality, mut chain_b_finality) =
 		(chain_a.finality_notifications().await, chain_b.finality_notifications().await);
 	// loop forever

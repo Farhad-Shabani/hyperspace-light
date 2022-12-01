@@ -1,6 +1,6 @@
 [package]
 # Simplified Hyperspace relayer (https://github.com/ComposableFi/centauri) for testing purposes
-name = "demo-relayer"
+name = "hyperspace-light"
 version = "0.1.0"
 edition = "2021"
 
