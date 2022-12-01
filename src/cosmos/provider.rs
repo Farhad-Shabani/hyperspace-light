@@ -36,7 +36,8 @@ use ibc_relayer_types::{
     },
     core::{
         ics02_client::{
-            client_type::ClientType, events as ClientEvents, trust_threshold::TrustThreshold,
+            client_type::ClientType, events as ClientEvents, msgs::update_client::MsgUpdateClient,
+            trust_threshold::TrustThreshold,
         },
         ics04_channel::channel::ChannelEnd,
         ics23_commitment::{commitment::CommitmentPrefix, specs::ProofSpecs},
@@ -47,14 +48,15 @@ use ibc_relayer_types::{
     },
     events::IbcEvent,
     timestamp::Timestamp,
+    tx_msg::Msg,
     Height,
 };
-use tendermint::block::Header;
-
 use std::pin::Pin;
 use std::str::FromStr;
-use tendermint::block::Height as TmHeight;
-use tendermint::Time;
+use tendermint::{
+    block::{Header, Height as TmHeight},
+    Time,
+};
 use tendermint_rpc::{
     endpoint::tx::Response,
     event::{Event, EventData},
@@ -87,7 +89,70 @@ where
     where
         C: Chain,
     {
-        todo!()
+        let client_id = counterparty.client_id();
+        let latest_cp_height = counterparty.latest_height_and_timestamp().await?.0;
+        let latest_cp_client_state = counterparty
+            .query_client_state(latest_cp_height, client_id)
+            .await?;
+        let client_state_response = latest_cp_client_state
+            .client_state
+            .ok_or_else(|| Error::Custom("counterparty returned empty client state".to_string()))?;
+
+        let client_state = ClientState::try_from(client_state_response)
+            .map_err(|err| Error::Custom("failed to decode client state response".to_string()))?;
+
+        let latest_cp_client_height = client_state.latest_height().revision_height();
+        let latest_height = self.rpc_client.latest_block().await?.block.header.height;
+
+        let mut ibc_events: Vec<IbcEventWithHeight> = vec![];
+        for height in latest_cp_client_height + 1..latest_height.value() + 1 {
+            // todo()! maybe there's a more efficient way to query for blocks in batches?
+            let block_results = self
+                .rpc_client
+                .block_results(TmHeight::try_from(height).unwrap())
+                .await
+                .map_err(|e| {
+                    Error::from(format!(
+                        "Failed to query block result for height {:?}: {:?}",
+                        height, e
+                    ))
+                })?;
+
+            let tx_results = block_results
+                .txs_results
+                .ok_or_else(|| Error::Custom("empty transaction results".to_string()))
+                .unwrap();
+            for tx in tx_results.iter() {
+                for event in tx.clone().events {
+                    let ibc_event = ibc_event_try_from_abci_event(&event)?;
+                    ibc_events.push(IbcEventWithHeight::new(
+                        ibc_event,
+                        client_state.latest_height(),
+                    ));
+                }
+            }
+        }
+
+        let update_header =
+            CosmosClient::msg_update_client_header(self, client_state.latest_height).await?;
+        let update_client_header = {
+            let msg = MsgUpdateClient {
+                client_id: self.client_id(),
+                header: update_header.0.into(),
+                signer: counterparty.account_id(),
+            };
+            let value = msg.encode_vec().map_err(|e| {
+                Error::from(format!(
+                    "Failed to encode MsgUpdateClient {:?}: {:?}",
+                    msg, e
+                ))
+            })?;
+            Any {
+                value,
+                type_url: msg.type_url(),
+            }
+        };
+        Ok((update_client_header, ibc_events, update_header.1))
     }
 
     // Changed result: `Item =` from `IbcEvent` to `IbcEventWithHeight` to include the necessary height field,
@@ -641,7 +706,7 @@ where
                 .flat_map(|e| ibc_event_try_from_abci_event(e).ok().into_iter())
                 .filter(|e| matches!(e, IbcEvent::CreateClient(_)))
                 .collect::<Vec<_>>();
-            log::info!(target: "demo-relayer", "Result: {:?}", result);
+            log::info!("Result: {:?}", result);
             if result.clone().len() != 1 {
                 Err(Error::from(format!(
                     "Expected exactly one CreateClient event, found {}",

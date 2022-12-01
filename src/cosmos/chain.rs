@@ -19,7 +19,7 @@ use tendermint_rpc::{
     event::Event,
     event::EventData,
     query::{EventType, Query},
-    Client, Error as RpcError, SubscriptionClient, WebSocketClient,
+    Client, SubscriptionClient, WebSocketClient,
 };
 
 #[async_trait::async_trait]
@@ -46,13 +46,14 @@ where
             .await
             .map_err(|e| Error::from(format!("Web Socket Client Error {:?}", e)))
             .unwrap();
+        log::info!(target: "hyperspace-light", "subscribing to events");
         tokio::spawn(ws_driver.run());
         let subscription = ws_client
             .subscribe(Query::from(EventType::NewBlock))
             .await
             .map_err(|e| Error::from(format!("failed to subscribe to new blocks {:?}", e)))
             .unwrap();
-
+        log::info!(target: "hyperspace-light", "🚀🚀 Subscribed to new blocks");
         let stream = subscription.filter_map(|event| {
             let Event {
                 data,
@@ -175,7 +176,6 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-        log::info!(target: "demo-relayer", "Simulate response: {:?}", response);
         // -----------------------------------------------------------
 
         // Submit transaction
@@ -184,7 +184,7 @@ where
             .broadcast_tx_sync(tx_bytes.into())
             .await
             .map_err(|e| Error::from(format!("failed to broadcast transaction {:?}", e)))?;
-        log::info!(target:"demo-relayer", "Broadcast response: {:?}", response);
+        log::info!("Broadcast response: {:?}", response);
         Ok(TransactionId {
             hash: response.hash,
         })

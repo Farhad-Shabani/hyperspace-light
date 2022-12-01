@@ -30,8 +30,8 @@ pub struct Verified<H> {
 
 #[derive(Clone, Debug)]
 pub struct LightClient {
-    peer_id: PeerId,
-    io: ProdIo,
+    pub peer_id: PeerId,
+    pub io: ProdIo,
 }
 
 impl LightClient {

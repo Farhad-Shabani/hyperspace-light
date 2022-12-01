@@ -15,26 +15,36 @@
 use super::key_provider::KeyEntry;
 use super::light_client::LightClient;
 use crate::core::error::Error;
-use crate::core::primitives::{IbcProvider, KeyProvider};
+use crate::core::primitives::{IbcProvider, KeyProvider, UpdateType};
 use core::convert::{From, Into, TryFrom};
 use ibc_proto::cosmos::auth::v1beta1::{
     query_client::QueryClient, BaseAccount, QueryAccountRequest,
 };
 use ibc_relayer_types::{
-    clients::ics07_tendermint::{client_state::ClientState, consensus_state::ConsensusState},
+    clients::ics07_tendermint::{
+        client_state::ClientState, consensus_state::ConsensusState, header::Header,
+    },
     core::{
         ics02_client::{client_type::ClientType, height::Height},
-        ics23_commitment::commitment::CommitmentPrefix,
+        ics23_commitment::{
+            commitment::{CommitmentPrefix, CommitmentProofBytes},
+            merkle::convert_tm_to_ics_merkle_proof,
+        },
         ics24_host::{
             identifier::{ChainId, ChannelId, ClientId, ConnectionId, PortId},
             Path, IBC_QUERY_PATH,
         },
     },
+    keys::STORE_KEY,
 };
 use prost::Message;
 use serde::Deserialize;
 use std::str::FromStr;
-use tendermint::block::Height as TmHeight;
+use tendermint::{
+    abci::{Code, Path as TendermintABCIPath},
+    block::Height as TmHeight,
+};
+use tendermint_light_client::components::io::{AtHeight, Io};
 use tendermint_rpc::{endpoint::abci_query::AbciQuery, Client, HttpClient, Url};
 
 // Implements the [`crate::Chain`] trait for cosmos.
@@ -186,6 +196,112 @@ where
 
     pub async fn submit_call(&self) -> Result<(), Error> {
         todo!()
+    }
+
+    pub async fn msg_update_client_header(
+        &mut self,
+        trusted_height: Height,
+    ) -> Result<(Header, UpdateType), Error> {
+        let latest_light_block = self
+            .light_client
+            .io
+            .fetch_light_block(AtHeight::Highest)
+            .map_err(|e| {
+                Error::from(format!(
+                    "Failed to fetch light block for chain {:?} with error {:?}",
+                    self.name, e
+                ))
+            })?;
+        let height = TmHeight::try_from(trusted_height.revision_height()).map_err(|e| {
+            Error::from(format!(
+                "Failed to convert height for chain {:?} with error {:?}",
+                self.name, e
+            ))
+        })?;
+        let trusted_light_block = self
+            .light_client
+            .io
+            .fetch_light_block(AtHeight::At(height))
+            .map_err(|e| {
+                Error::from(format!(
+                    "Failed to fetch light block for chain {:?} with error {:?}",
+                    self.name, e
+                ))
+            })?;
+
+        let update_type = match latest_light_block.validators == latest_light_block.next_validators
+        {
+            true => UpdateType::Optional,
+            false => UpdateType::Mandatory,
+        };
+
+        Ok((
+            Header {
+                signed_header: latest_light_block.signed_header,
+                validator_set: latest_light_block.validators,
+                trusted_height,
+                trusted_validator_set: trusted_light_block.validators,
+            },
+            update_type,
+        ))
+    }
+
+    pub async fn query_tendermint_proof(
+        &self,
+        key: Vec<u8>,
+        height: Height,
+    ) -> Result<(Vec<u8>, Vec<u8>), Error> {
+        let path = format!("store/{}/key", STORE_KEY)
+            .as_str()
+            .parse::<TendermintABCIPath>()
+            .map_err(|err| Error::Custom(format!("failed to parse path: {}", err)));
+        let height = TmHeight::try_from(height.revision_height()).map_err(|e| {
+            Error::from(format!(
+                "Failed to convert height for chain {:?} with error {:?}",
+                self.name, e
+            ))
+        })?;
+        let query_res = self
+            .rpc_client
+            .abci_query(path.ok(), key, Some(height), true)
+            .await
+            .map_err(|e| {
+                Error::from(format!(
+                    "Failed to query proof for chain {:?} with error {:?}",
+                    self.name, e
+                ))
+            })?;
+
+        if !query_res.code.is_ok() {
+            // Fail with response log.
+            // todo()! add response code to error
+            return Err(Error::Custom(format!("failed abci query")));
+        }
+
+        if query_res.proof.is_none() {
+            // Fail due to empty proof
+            return Err(Error::Custom(format!("proof response is empty")));
+        }
+
+        match query_res {
+            AbciQuery {
+                code: Code::Err(_), ..
+            } => return Err(Error::Custom(format!("failed abci query"))),
+            AbciQuery { proof: None, .. } => {
+                return Err(Error::Custom(format!("failed abci query")))
+            }
+            _ => (),
+        };
+
+        let merkle_proof = query_res
+            .proof
+            .map(|p| convert_tm_to_ics_merkle_proof(&p))
+            .ok_or_else(|| {
+                Error::Custom("could not convert proof Op to merkle proof".to_string())
+            })?;
+        let proof = CommitmentProofBytes::try_from(merkle_proof.unwrap())
+            .map_err(|err| Error::Custom(format!("bad client state proof: {}", err)))?;
+        Ok((query_res.value, proof.into()))
     }
 
     /// Uses the GRPC client to retrieve the account sequence

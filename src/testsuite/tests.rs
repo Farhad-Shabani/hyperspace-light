@@ -55,7 +55,7 @@ where
     // now send from chain b.
     let (previous_balance, ..) = send_transfer(chain_b, chain_a, channel_id).await;
     assert_send_transfer(chain_b, previous_balance, 20 * 60).await;
-    log::info!(target: "demo-relayer", "🚀🚀 Token Transfer successful with connection delay");
+    log::info!(target: "hyperspace-light", "🚀🚀 Token Transfer successful with connection delay");
 }
 
 /// Attempts to send 20% of funds of chain_a's signer to chain b's signer.
@@ -157,7 +157,7 @@ async fn send_packet_and_assert_height_timeout<A, B>(
     B::FinalityEvent: Send + Sync,
     B::Error: From<A::Error>,
 {
-    log::info!(target: "demo-relayer", "Suspending send packet relay");
+    log::info!(target: "hyperspace-light", "Suspending send packet relay");
 
     let (.., msg) = send_transfer(chain_a, chain_b, channel_id).await;
 
@@ -171,7 +171,7 @@ async fn send_packet_and_assert_height_timeout<A, B>(
         .take(1)
         .collect::<Vec<_>>();
 
-    log::info!(target: "demo-relayer", "Waiting for packet timeout to elapse on counterparty");
+    log::info!(target: "hyperspace-light", "Waiting for packet timeout to elapse on counterparty");
     timeout_future(
         future,
         10 * 60,
@@ -179,9 +179,9 @@ async fn send_packet_and_assert_height_timeout<A, B>(
     )
     .await;
 
-    log::info!(target: "demo-relayer", "Resuming send packet relay");
+    log::info!(target: "hyperspace-light", "Resuming send packet relay");
     assert_timeout_packet(chain_a).await;
-    log::info!(target: "demo-relayer", "🚀🚀 Timeout packet successfully processed for height timeout");
+    log::info!(target: "hyperspace-light", "🚀🚀 Timeout packet successfully processed for height timeout");
 }
 
 pub fn parse_amount(amount: String) -> u128 {

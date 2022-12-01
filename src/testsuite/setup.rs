@@ -105,7 +105,7 @@ pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<
     let channels = chain_b.query_channels().await.unwrap();
     log::info!(target: "hyperspace-light", "Channels on chain_b: {:?}", channels);
     let (client_a, client_b) = create_clients(&chain_a, &chain_b).await.unwrap();
-    
+
     chain_a.set_client_id(client_a);
     chain_b.set_client_id(client_b);
     (chain_a, chain_b)
@@ -141,7 +141,6 @@ where
         )
         .await
         .unwrap();
-    log::info!(target: "hyperspace-light", "Connections: {:?}", connections);
     for connection in connections {
         let connection_id = ConnectionId::from_str(&connection.id).unwrap();
         let connection_end = chain_a
@@ -150,7 +149,7 @@ where
             .unwrap()
             .connection
             .unwrap();
-
+        log::info!(target: "hyperspace-light", "Connection end: {:?}", connection_end);
         let delay_period = Duration::from_nanos(connection_end.delay_period);
         if delay_period != connection_delay {
             continue;
@@ -161,7 +160,6 @@ where
             .await
             .unwrap()
             .channels;
-        log::info!(target: "hyperspace-light", "Channels: {:?}", channels);
         for channel in channels {
             let channel_id = ChannelId::from_str(&channel.channel_id).unwrap();
             let channel_end = chain_a
@@ -171,12 +169,18 @@ where
                 .channel
                 .unwrap();
             let channel_end = ChannelEnd::try_from(channel_end.clone()).unwrap();
+            log::info!(target: "hyperspace-light", "Channel end: {:?}", channel_end);
             if channel_end.state == State::Open && channel.port_id == PortId::transfer().to_string()
             {
                 return (
                     handle,
                     channel_id,
-                    channel_end.counterparty().channel_id.as_ref().unwrap().clone(),
+                    channel_end
+                        .counterparty()
+                        .channel_id
+                        .as_ref()
+                        .unwrap()
+                        .clone(),
                     channel_end.connection_hops[0].clone(),
                 );
             }

@@ -94,7 +94,9 @@ pub async fn create_connection(
 
     chain_a.submit(vec![msg.to_any()]).await?;
 
-    log::info!(target: "demo-relayer", "============= Wait till both chains have completed connection handshake =============");
+    log::info!(
+        "============= Wait till both chains have completed connection handshake ============="
+    );
 
     // wait till both chains have completed connection handshake
     let future = chain_b
@@ -125,7 +127,6 @@ pub async fn create_connection(
         },
         got => panic!("Last event should be OpenConfirmConnection: {got:?}"),
     };
-
     Ok((connection_id_a, connection_id_b))
 }
 

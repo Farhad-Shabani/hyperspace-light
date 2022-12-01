@@ -1,5 +1,7 @@
 use hyperspace_light::core::logging;
-use hyperspace_light::testsuite::{tests::ibc_messaging_with_connection_delay, setup::setup_clients};
+use hyperspace_light::testsuite::{
+    setup::setup_clients, tests::ibc_messaging_with_connection_delay,
+};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cosmos_cosmos() {
