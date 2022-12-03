@@ -29,6 +29,7 @@ where
     let (handle, channel_id, channel_b, _connection_id) =
         setup_connection_and_channel(chain_a, chain_b, Duration::from_secs(60 * 5)).await; // 5 mins delay
     handle.abort();
+    log::info!(target: "hyperspace-light", "🧹 Relay thread aborted");
     // Set channel whitelist and restart relayer loop
     chain_a.set_channel_whitelist(vec![(channel_id.clone(), PortId::transfer())]);
     chain_b.set_channel_whitelist(vec![(channel_b, PortId::transfer())]);
@@ -37,6 +38,7 @@ where
     let handle =
         tokio::task::spawn(async move { relay(client_a_clone, client_b_clone).await.unwrap() });
     send_packet_with_connection_delay(chain_a, chain_b, channel_id).await;
+    log::info!(target: "hyperspace-light", "🧹 Relay thread aborted");
     handle.abort()
 }
 
@@ -55,7 +57,7 @@ where
     // now send from chain b.
     let (previous_balance, ..) = send_transfer(chain_b, chain_a, channel_id).await;
     assert_send_transfer(chain_b, previous_balance, 20 * 60).await;
-    log::info!(target: "hyperspace-light", "🚀🚀 Token Transfer successful with connection delay");
+    log::info!(target: "hyperspace-light", "🙌🙌🙌 Token Transfer successful with connection delay");
 }
 
 /// Attempts to send 20% of funds of chain_a's signer to chain b's signer.

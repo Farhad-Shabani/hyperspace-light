@@ -3,6 +3,7 @@
 name = "hyperspace-light"
 version = "0.1.0"
 edition = "2021"
+authors = ["Farhad Shabani <farhad.shabani@gmail.com>"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -32,7 +32,7 @@ where
     }
 
     fn block_max_weight(&self) -> u64 {
-        todo!()
+        2097152
     }
 
     async fn estimate_weight(&self, _messages: Vec<Any>) -> Result<u64, Self::Error> {
@@ -46,14 +46,13 @@ where
             .await
             .map_err(|e| Error::from(format!("Web Socket Client Error {:?}", e)))
             .unwrap();
-        log::info!(target: "hyperspace-light", "subscribing to events");
         tokio::spawn(ws_driver.run());
         let subscription = ws_client
             .subscribe(Query::from(EventType::NewBlock))
             .await
             .map_err(|e| Error::from(format!("failed to subscribe to new blocks {:?}", e)))
             .unwrap();
-        log::info!(target: "hyperspace-light", "🚀🚀 Subscribed to new blocks");
+        log::info!(target: "hyperspace-light", "🛰️ Subscribed to {} listening to finality notifications", self.name);
         let stream = subscription.filter_map(|event| {
             let Event {
                 data,
@@ -184,7 +183,7 @@ where
             .broadcast_tx_sync(tx_bytes.into())
             .await
             .map_err(|e| Error::from(format!("failed to broadcast transaction {:?}", e)))?;
-        log::info!("Broadcast response: {:?}", response);
+        log::info!(target: "hyperspace-light", "🚀 Transaction submitted to {} with hash: {}", self.name, response.hash);
         Ok(TransactionId {
             hash: response.hash,
         })

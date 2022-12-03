@@ -34,6 +34,6 @@ where
 
     /// Set the channel whitelist for the relayer task.
     fn set_channel_whitelist(&mut self, channel_whitelist: Vec<(ChannelId, PortId)>) {
-        todo!()
+        self.channel_whitelist = channel_whitelist;
     }
 }

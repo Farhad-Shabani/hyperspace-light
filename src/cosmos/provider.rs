@@ -112,9 +112,9 @@ where
             .map_err(|_| Error::Custom("failed to decode client state response".to_string()))?;
         let latest_cp_client_height = client_state.latest_height().revision_height();
         let latest_height = self.rpc_client.latest_block().await?.block.header.height;
+
         let mut ibc_events: Vec<IbcEventWithHeight> = vec![];
         for height in latest_cp_client_height + 1..latest_height.value() + 1 {
-            // todo()! maybe there's a more efficient way to query for blocks in batches?
             let block_results = self
                 .rpc_client
                 .block_results(TmHeight::try_from(height).unwrap())
@@ -141,7 +141,6 @@ where
                     }
                 }
             }
-            log::info!("ibc_events: {:?}", ibc_events);
         }
         let update_header =
             CosmosClient::msg_update_client_header(self, client_state.latest_height).await?;
@@ -503,7 +502,7 @@ where
     }
 
     fn channel_whitelist(&self) -> Vec<(ChannelId, PortId)> {
-        todo!()
+        self.channel_whitelist.clone()
     }
 
     async fn query_connection_channels(

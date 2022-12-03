@@ -36,10 +36,10 @@ pub async fn flush_message_batch(msgs: Vec<Any>, sink: &impl Chain) -> Result<()
     };
 
     log::info!(
-		"Outgoing messages weight: {} exceeds the block max weight: {}. Chunking {} messages into {} chunks",
-        batch_weight, block_max_weight, msgs.len(), chunk,
-	);
-    // TODO: return number of failed messages and record it to metrics
+        target: "hyperspace-light",
+        "🏗️ Splitting batch into {} chunks",
+        chunk
+    );
     for batch in msgs.chunks(chunk) {
         // send out batches.
         sink.submit(batch.to_vec()).await?;

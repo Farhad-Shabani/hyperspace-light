@@ -116,7 +116,6 @@ pub async fn parse_events(
                         .client_state
                         .map(ClientState::try_from)
                         .ok_or_else(|| Error::Custom(format!("Client state is empty")))??;
-                    log::info!("🔍 Client state: {:?}", client_state);
                     let consensus_proof = source
                         .query_client_consensus(
                             ev.height,
@@ -681,7 +680,6 @@ pub async fn parse_events(
     let (ready_packets, timed_out_packets) =
         query_ready_and_timed_out_packets(source, sink).await?;
     messages.extend(ready_packets);
-
     Ok((messages, timed_out_packets))
 }
 

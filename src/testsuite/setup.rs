@@ -59,7 +59,7 @@ pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<
     let mut chain_b = CosmosClient::<H>::new(config_b).await.unwrap();
 
     // Wait until for cosmos to start producing blocks
-    log::info!(target: "hyperspace-light", "Waiting for block production from Cosmos chains");
+    log::info!(target: "hyperspace-light", "🏗️ Waiting for block production from Cosmos chains ========================= ");
     let new_block_chain_a = chain_a
         .ibc_events()
         .await
@@ -67,7 +67,7 @@ pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<
         .take(1)
         .collect::<Vec<_>>()
         .await;
-    log::info!(target: "hyperspace-light", "Received {:?} events", new_block_chain_a);
+    log::info!(target: "hyperspace-light", "🤝 Received block from chain_a: {:?}", new_block_chain_a[0].event);
 
     let new_block_chain_b = chain_b
         .ibc_events()
@@ -76,35 +76,28 @@ pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<
         .take(1)
         .collect::<Vec<_>>()
         .await;
-    log::info!(target: "hyperspace-light", "Received {:?} events", new_block_chain_b);
-    log::info!(target: "hyperspace-light", "Cosmos chains are ready to go!");
+    log::info!(target: "hyperspace-light", "🤝 Received block from chain_a: {:?}", new_block_chain_b[0].event);
+
+    let height = chain_a.latest_height_and_timestamp().await.unwrap();
+    log::info!(target: "hyperspace-light", "🧾 Latest height on chain_a: {:?}", height);
+    let height = chain_b.latest_height_and_timestamp().await.unwrap();
+    log::info!(target: "hyperspace-light", "🧾 Latest height on chain_b: {:?}", height);
 
     // Check if the clients are already created
     let clients_on_a = chain_a.query_clients().await.unwrap();
-    log::info!(target: "hyperspace-light", "Clients on chain_a: {:?}", clients_on_a);
     let clients_on_b = chain_b.query_clients().await.unwrap();
-    log::info!(target: "hyperspace-light", "Clients on chain_b: {:?}", clients_on_b);
 
     if !clients_on_a.is_empty() && !clients_on_b.is_empty() {
-        chain_a.set_client_id(clients_on_b[0].clone());
+        chain_a.set_client_id(clients_on_a[0].clone());
         chain_b.set_client_id(clients_on_b[0].clone());
+        log::info!(target: "hyperspace-light", "🧾 Client on chain_a already exists: {:?}", chain_a.client_id());
+        log::info!(target: "hyperspace-light", "🧾 Client on chain_b already exists: {:?}", chain_b.client_id());
         return (chain_a, chain_b);
     }
 
-    let height = chain_a.latest_height_and_timestamp().await.unwrap();
-    log::info!(target: "hyperspace-light", "Latest height on chain_a: {:?}", height);
-    let time = chain_a.query_timestamp_at(10).await.unwrap();
-    log::info!(target: "hyperspace-light", "Timestamp at height 10 on chain_a: {:?}", time);
-    let channels = chain_a.query_channels().await.unwrap();
-    log::info!(target: "hyperspace-light", "Channels on chain_a: {:?}", channels);
-
-    let height = chain_b.latest_height_and_timestamp().await.unwrap();
-    log::info!(target: "hyperspace-light", "Latest height on chain_b: {:?}", height);
-    let time = chain_b.query_timestamp_at(10).await.unwrap();
-    log::info!(target: "hyperspace-light", "Timestamp at height 10 on chain_b: {:?}", time);
-    let channels = chain_b.query_channels().await.unwrap();
-    log::info!(target: "hyperspace-light", "Channels on chain_b: {:?}", channels);
     let (client_a, client_b) = create_clients(&chain_a, &chain_b).await.unwrap();
+    log::info!(target: "hyperspace-light", "🧾 Client on chain_a is created: {:?}", client_a);
+    log::info!(target: "hyperspace-light", "🧾 Client on chain_b is created: {:?}", client_b);
 
     chain_a.set_client_id(client_a);
     chain_b.set_client_id(client_b);
@@ -141,6 +134,7 @@ where
         )
         .await
         .unwrap();
+    log::info!(target: "hyperspace-light", "🧾 Connections on chain_a: {:?}", connections);
     for connection in connections {
         let connection_id = ConnectionId::from_str(&connection.id).unwrap();
         let connection_end = chain_a
@@ -149,7 +143,6 @@ where
             .unwrap()
             .connection
             .unwrap();
-        log::info!(target: "hyperspace-light", "Connection end: {:?}", connection_end);
         let delay_period = Duration::from_nanos(connection_end.delay_period);
         if delay_period != connection_delay {
             continue;
@@ -160,6 +153,7 @@ where
             .await
             .unwrap()
             .channels;
+        log::info!(target: "hyperspace-light", "🧾 Channels on chain_a: {:?}", channels);
         for channel in channels {
             let channel_id = ChannelId::from_str(&channel.channel_id).unwrap();
             let channel_end = chain_a
@@ -169,7 +163,6 @@ where
                 .channel
                 .unwrap();
             let channel_end = ChannelEnd::try_from(channel_end.clone()).unwrap();
-            log::info!(target: "hyperspace-light", "Channel end: {:?}", channel_end);
             if channel_end.state == State::Open && channel.port_id == PortId::transfer().to_string()
             {
                 return (
@@ -189,10 +182,9 @@ where
     let (connection_id, ..) = create_connection(chain_a, chain_b, connection_delay)
         .await
         .unwrap();
+    log::info!(target: "hyperspace-light", "🤝 Connection handshake completed: ConnectionId({connection_id}) ============");
 
-    log::info!(target: "hyperspace-light", "============ Connection handshake completed: ConnectionId({connection_id}) ============");
-    log::info!(target: "hyperspace-light", "=========================== Starting channel handshake ===========================");
-
+    log::info!(target: "hyperspace-light", "🏗️ Starting channel handshake ===========================");
     let (channel_id_a, channel_id_b) = create_channel(
         chain_a,
         chain_b,
@@ -203,8 +195,8 @@ where
     )
     .await
     .unwrap();
+
     // channel handshake completed
-    log::info!(target: "hyperspace-light", "============ Channel handshake completed: ChannelId({channel_id_a}) ============");
-    todo!()
-    // (handle, channel_id_a, channel_id_b, connection_id)
+    log::info!(target: "hyperspace-light", "🤝 Channel handshake completed: ChannelId({channel_id_a}) ============");
+    (handle, channel_id_a, channel_id_b, connection_id)
 }

@@ -1,17 +1,3 @@
-// Copyright 2022 ComposableFi
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 use crate::core::primitives::Chain;
 use futures::{future, StreamExt};
 use ibc_proto::google::protobuf::Any;
@@ -58,6 +44,7 @@ pub async fn create_clients(
         type_url: msg.type_url(),
         value: msg.encode_vec()?,
     };
+    log::info!(target: "hyperspace-light", "🏗️ Sending MsgCreateClient to chain A");
     let tx_id = chain_a.submit(vec![msg]).await?;
     let client_id_b_on_a = chain_a.query_client_id_from_tx_hash(tx_id).await?;
 
@@ -71,6 +58,7 @@ pub async fn create_clients(
         value: msg.encode_vec()?,
     };
 
+    log::info!(target: "hyperspace-light", "🏗️ Sending MsgCreateClient to chain b");
     let tx_id = chain_b.submit(vec![msg]).await?;
     let client_id_a_on_b = chain_b.query_client_id_from_tx_hash(tx_id).await?;
 
@@ -92,13 +80,11 @@ pub async fn create_connection(
         signer: chain_a.account_id(),
     };
 
+    log::info!(target: "hyperspace-light", "📡 Sending MsgConnectionOpenInit to chain A");
     chain_a.submit(vec![msg.to_any()]).await?;
 
-    log::info!(
-        "============= Wait till both chains have completed connection handshake ============="
-    );
-
     // wait till both chains have completed connection handshake
+    log::info!(target: "hyperspace-light", "🏗️ Waiting for connection handshake to complete =================================== ");
     let future = chain_b
         .ibc_events()
         .await
@@ -150,10 +136,10 @@ pub async fn create_channel(
 
     let msg = MsgChannelOpenInit::new(port_id, channel, chain_a.account_id());
 
+    log::info!(target: "hyperspace-light", "📡 Sending MsgChannelOpenInit to chain A");
     chain_a.submit(vec![msg.to_any()]).await?;
 
-    log::info!(target: "hyperspace-light", "============= Wait till both chains have completed channel handshake =============");
-
+    log::info!(target: "hyperspace-light", "🏗️ Waiting for channel handshake to complete =================================== ");
     let future = chain_b
         .ibc_events()
         .await
