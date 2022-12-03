@@ -78,6 +78,7 @@ pub enum FinalityEvent {
     Tendermint(Header),
 }
 
+#[derive(Clone, Debug)]
 pub struct TransactionId<Hash> {
     pub hash: Hash,
 }
@@ -784,7 +785,6 @@ where
                 .flat_map(|e| ibc_event_try_from_abci_event(e).ok().into_iter())
                 .filter(|e| matches!(e, IbcEvent::CreateClient(_)))
                 .collect::<Vec<_>>();
-            log::info!("Result: {:?}", result);
             if result.clone().len() != 1 {
                 Err(Error::from(format!(
                     "Expected exactly one CreateClient event, found {}",

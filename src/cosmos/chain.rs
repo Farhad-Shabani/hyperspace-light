@@ -1,25 +1,21 @@
 use super::client::CosmosClient;
-use super::provider::TransactionId;
+use super::encode::{
+    encode_auth_info, encode_key_bytes, encode_sign_doc, encode_signer_info, encode_tx,
+    encode_tx_body,
+};
+use super::tx::{broadcast_tx, confirm_tx, simulate_tx};
 use crate::core::error::Error;
 use crate::core::primitives::{Chain, IbcProvider};
 use crate::cosmos::provider::FinalityEvent;
 use futures::{Stream, StreamExt};
 use ibc_proto::cosmos::base::v1beta1::Coin;
-use ibc_proto::{
-    cosmos::tx::v1beta1::{
-        mode_info::{Single, Sum},
-        AuthInfo, Fee, ModeInfo, SignDoc, SignerInfo, TxBody, TxRaw,
-    },
-    google::protobuf::Any,
-};
-use k256::ecdsa::{signature::Signer as _, Signature, SigningKey};
-use prost::Message;
+use ibc_proto::{cosmos::tx::v1beta1::Fee, google::protobuf::Any};
 use std::pin::Pin;
 use tendermint_rpc::{
     event::Event,
     event::EventData,
     query::{EventType, Query},
-    Client, SubscriptionClient, WebSocketClient,
+    SubscriptionClient, WebSocketClient,
 };
 
 #[async_trait::async_trait]
@@ -72,120 +68,52 @@ where
     }
 
     async fn submit(&self, messages: Vec<Any>) -> Result<Self::TransactionId, Error> {
-        // Create SignerInfo by encoding the keybase
         let account_info = self.query_account().await?;
-
-        let mut pk_buf = Vec::new();
-        Message::encode(&self.keybase.public_key.to_pub().to_bytes(), &mut pk_buf)
-            .map_err(|e| Error::from(e.to_string()))?;
-
-        let pk_type = "/cosmos.crypto.secp256k1.PubKey".to_string();
-        let pk_any = Any {
-            type_url: pk_type,
-            value: pk_buf,
-        };
-        let single = Single { mode: 1 };
-        let sum_single = Some(Sum::Single(single));
-        let mode = Some(ModeInfo { sum: sum_single });
-        let signer_info = SignerInfo {
-            public_key: Some(pk_any),
-            mode_info: mode,
-            sequence: account_info.sequence,
-        };
-
-        // Create and Encode TxBody
-        let body = TxBody {
-            messages,
-            memo: "ibc".to_string(), //TODO: Check if this is correct
-            timeout_height: 0_u64,
-            extension_options: Vec::<Any>::default(), //TODO: Check if this is correct
-            non_critical_extension_options: Vec::<Any>::default(),
-        };
-        let mut body_bytes = Vec::new();
-        Message::encode(&body, &mut body_bytes).map_err(|e| Error::from(e.to_string()))?;
+        let pk_bytes = encode_key_bytes(&self.keybase)?;
+        let signer_info = encode_signer_info(account_info.sequence, pk_bytes)?;
 
         // Create and Encode AuthInfo
-        let auth_info = AuthInfo {
-            signer_infos: vec![signer_info],
-            fee: Some(Fee {
+        let (auth_info, auth_info_bytes) = encode_auth_info(
+            signer_info,
+            Fee {
                 amount: vec![Coin {
-                    denom: "stake".to_string(),
-                    amount: "4000".to_string(),
+                    denom: "stake".to_string(), //TODO: This could be added to the config
+                    amount: "4000".to_string(), //TODO: This could be added to the config
                 }],
-                gas_limit: 400000_u64,
+                gas_limit: 400000_u64, //TODO: This could be added to the config
                 payer: "".to_string(),
                 granter: "".to_string(),
-            }),
-            tip: None,
-        };
-        let mut auth_info_bytes = Vec::new();
-        Message::encode(&auth_info, &mut auth_info_bytes)
-            .map_err(|e| Error::from(e.to_string()))?;
+            },
+        )?;
 
-        // Create and Encode SignDoc
-        let sign_doc = SignDoc {
-            body_bytes: body_bytes.clone(),
-            auth_info_bytes: auth_info_bytes.clone(),
-            chain_id: self.chain_id.to_string(),
-            account_number: account_info.account_number,
-        };
-        let mut signdoc_buf = Vec::new();
-        Message::encode(&sign_doc, &mut signdoc_buf).unwrap();
-
-        // Create signature
-        let private_key_bytes = self.keybase.private_key.to_priv().to_bytes();
-        let signing_key = SigningKey::from_bytes(private_key_bytes.as_slice())
-            .map_err(|e| Error::from(e.to_string()))?;
-        let signature: Signature = signing_key.sign(&signdoc_buf);
-        let signature_bytes = signature.as_ref().to_vec();
+        // Create and Encode TxBody
+        let (body, body_bytes) = encode_tx_body(messages)?;
 
         // Create and Encode TxRaw
-        let tx_raw = TxRaw {
+        let signature_bytes = encode_sign_doc(
+            self.keybase.clone(),
+            body_bytes.clone(),
+            auth_info_bytes.clone(),
+            self.chain_id.clone(),
+            account_info.account_number,
+        )?;
+
+        // Encode SignDoc and Create Signature
+        let (tx, tx_bytes) = encode_tx(
+            body,
             body_bytes,
+            auth_info,
             auth_info_bytes,
-            signatures: vec![signature_bytes.clone()],
-        };
-        let mut tx_bytes = Vec::new();
-        Message::encode(&tx_raw, &mut tx_bytes).map_err(|e| Error::from(e.to_string()))?;
+            signature_bytes,
+        )?;
 
-        // ------------------ Simulate transaction ------------------
-        use ibc_proto::cosmos::tx::v1beta1::service_client::ServiceClient;
-        use ibc_proto::cosmos::tx::v1beta1::{SimulateRequest, Tx};
-        use ibc_proto::google::protobuf::Any;
+        // Simulate transaction
+        let _ = simulate_tx(self.grpc_url.clone(), tx, tx_bytes.clone()).await?;
+        
+        // Broadcast transaction
+        let tx_id = broadcast_tx(&self.rpc_client, tx_bytes).await?;
 
-        use std::convert::{From, Into};
-        let tx = Tx {
-            body: Some(body),
-            auth_info: Some(auth_info),
-            signatures: vec![signature_bytes],
-        };
-
-        #[allow(deprecated)]
-        let req = SimulateRequest {
-            tx: Some(tx), // needed for simulation to go through with Cosmos SDK <  0.43
-            tx_bytes: tx_bytes.clone(), // needed for simulation to go through with Cosmos SDk >= 0.43
-        };
-
-        let mut client = ServiceClient::connect(self.grpc_url.clone().to_string())
-            .await
-            .map_err(|e| Error::from(e.to_string()))?;
-        let request = tonic::Request::new(req);
-        let response = client
-            .simulate(request)
-            .await
-            .map_err(|e| Error::from(e.to_string()))?
-            .into_inner();
-        // -----------------------------------------------------------
-
-        // Submit transaction
-        let response = self
-            .rpc_client
-            .broadcast_tx_sync(tx_bytes.into())
-            .await
-            .map_err(|e| Error::from(format!("failed to broadcast transaction {:?}", e)))?;
-        log::info!(target: "hyperspace-light", "🚀 Transaction submitted to {} with hash: {}", self.name, response.hash);
-        Ok(TransactionId {
-            hash: response.hash,
-        })
+        // wait for confirmation
+        confirm_tx(&self.rpc_client, tx_id.hash).await
     }
 }

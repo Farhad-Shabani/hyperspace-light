@@ -44,8 +44,9 @@ pub async fn create_clients(
         type_url: msg.type_url(),
         value: msg.encode_vec()?,
     };
-    log::info!(target: "hyperspace-light", "🏗️ Sending MsgCreateClient to chain A");
+    log::info!(target: "hyperspace-light", "📡 Sending MsgCreateClient to chain A");
     let tx_id = chain_a.submit(vec![msg]).await?;
+    log::info!(target: "hyperspace-light", "🚀 Transaction confirmed with hash: {:?}", tx_id);
     let client_id_b_on_a = chain_a.query_client_id_from_tx_hash(tx_id).await?;
 
     let msg = MsgCreateClient {
@@ -58,8 +59,9 @@ pub async fn create_clients(
         value: msg.encode_vec()?,
     };
 
-    log::info!(target: "hyperspace-light", "🏗️ Sending MsgCreateClient to chain b");
+    log::info!(target: "hyperspace-light", "📡 Sending MsgCreateClient to chain b");
     let tx_id = chain_b.submit(vec![msg]).await?;
+    log::info!(target: "hyperspace-light", "🚀 Transaction confirmed with hash: {:?}", tx_id);
     let client_id_a_on_b = chain_b.query_client_id_from_tx_hash(tx_id).await?;
 
     Ok((client_id_a_on_b, client_id_b_on_a))

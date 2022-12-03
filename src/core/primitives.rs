@@ -61,7 +61,7 @@ pub trait IbcProvider {
     type FinalityEvent;
 
     /// A representation of the transaction id for the chain
-    type TransactionId;
+    type TransactionId: Clone + Send + Sync + std::fmt::Debug;
 
     /// Error type, just needs to implement standard error trait.
     type Error: std::error::Error + From<String> + Send + Sync + 'static;
@@ -607,7 +607,7 @@ pub async fn query_maximum_height_for_timeout_proofs(
 }
 
 pub fn apply_prefix(mut commitment_prefix: Vec<u8>, path: String) -> Vec<u8> {
-	let path = path.as_bytes().to_vec();
-	commitment_prefix.extend_from_slice(&path);
-	commitment_prefix
+    let path = path.as_bytes().to_vec();
+    commitment_prefix.extend_from_slice(&path);
+    commitment_prefix
 }
