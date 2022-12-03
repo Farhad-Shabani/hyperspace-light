@@ -14,7 +14,7 @@
 
 use super::connection_delay::has_delay_elapsed;
 use crate::core::error::Error;
-use crate::core::primitives::{find_suitable_proof_height_for_client, Chain};
+use crate::core::primitives::{apply_prefix, find_suitable_proof_height_for_client, Chain};
 use core::convert::Into;
 use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
 use ibc_relayer_types::{
@@ -29,7 +29,7 @@ use ibc_relayer_types::{
             packet::Packet,
             timeout::TimeoutHeight,
         },
-        ics23_commitment::{commitment::CommitmentProofBytes, merkle::apply_prefix},
+        ics23_commitment::commitment::CommitmentProofBytes,
         ics24_host::path::{
             AcksPath, ChannelEndsPath, CommitmentsPath, ReceiptsPath, SeqRecvsPath,
         },
@@ -170,18 +170,18 @@ pub async fn construct_timeout_message(
 ) -> Result<Any, anyhow::Error> {
     let key = if sink_channel_end.ordering == Order::Ordered {
         let path = get_key_path(KeyPathType::SeqRecv, &packet);
-        apply_prefix(&sink.connection_prefix(), vec![path])
+        apply_prefix(sink.connection_prefix().into_vec(), path)
     } else {
         let path = get_key_path(KeyPathType::ReceiptPath, &packet);
-        apply_prefix(&sink.connection_prefix(), vec![path])
+        apply_prefix(sink.connection_prefix().into_vec(), path)
     };
 
-    let proof_unreceived = sink.query_proof(proof_height, key).await?;
+    let proof_unreceived = sink.query_proof(proof_height, vec![key]).await?;
     let proof_unreceived = CommitmentProofBytes::try_from(proof_unreceived)?;
     let msg = if sink_channel_end.state == State::Closed {
         let path = get_key_path(KeyPathType::ChannelPath, &packet);
-        let channel_key = apply_prefix(&sink.connection_prefix(), vec![path]);
-        let proof_closed = sink.query_proof(proof_height, channel_key).await?;
+        let channel_key = apply_prefix(sink.connection_prefix().into_vec(), path);
+        let proof_closed = sink.query_proof(proof_height, vec![channel_key]).await?;
         let proof_closed = CommitmentProofBytes::try_from(proof_closed)?;
         let msg = MsgTimeoutOnClose {
             packet,
@@ -229,8 +229,8 @@ pub async fn construct_recv_message(
 ) -> Result<Any, Error> {
     let path = get_key_path(KeyPathType::CommitmentPath, &packet);
 
-    let key = apply_prefix(&source.connection_prefix(), vec![path]);
-    let proof = source.query_proof(proof_height, key).await.unwrap();
+    let key = apply_prefix(source.connection_prefix().into_vec(), path);
+    let proof = source.query_proof(proof_height, vec![key]).await.unwrap();
     let commitment_proof = CommitmentProofBytes::try_from(proof).unwrap();
     let msg = MsgRecvPacket {
         packet,
@@ -256,8 +256,8 @@ pub async fn construct_ack_message(
 ) -> Result<Any, Error> {
     let path = get_key_path(KeyPathType::AcksPath, &packet);
 
-    let key = apply_prefix(&source.connection_prefix(), vec![path]);
-    let proof = source.query_proof(proof_height, key).await.unwrap();
+    let key = apply_prefix(source.connection_prefix().into_vec(), path);
+    let proof = source.query_proof(proof_height, vec![key]).await.unwrap();
     let commitment_proof = CommitmentProofBytes::try_from(proof).unwrap();
     let msg = MsgAcknowledgement {
         packet,

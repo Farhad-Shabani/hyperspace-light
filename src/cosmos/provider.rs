@@ -11,7 +11,8 @@ use futures::{
     stream::{self, select_all},
     Stream, StreamExt,
 };
-use ibc_proto::ibc::core::commitment::v1::MerklePath;
+use ibc_proto::ibc::core::channel::v1::QueryChannelRequest;
+use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest;
 use ibc_proto::{
     google::protobuf::Any,
     ibc::core::{
@@ -22,9 +23,13 @@ use ibc_proto::{
             QueryPacketReceiptResponse,
         },
         client::v1::{
-            QueryClientStateResponse, QueryClientStatesRequest, QueryConsensusStateResponse,
+            QueryClientStateRequest, QueryClientStateResponse, QueryClientStatesRequest,
+            QueryConsensusStateResponse,
         },
-        connection::v1::{IdentifiedConnection, QueryConnectionResponse, QueryConnectionsRequest},
+        connection::v1::{
+            IdentifiedConnection, QueryConnectionRequest, QueryConnectionResponse,
+            QueryConnectionsRequest,
+        },
     },
     protobuf::Protobuf,
 };
@@ -40,10 +45,15 @@ use ibc_relayer_types::{
             trust_threshold::TrustThreshold,
         },
         ics04_channel::channel::ChannelEnd,
-        ics23_commitment::{commitment::CommitmentPrefix, specs::ProofSpecs},
+        ics23_commitment::{
+            commitment::{CommitmentPrefix, CommitmentProofBytes},
+            merkle::convert_tm_to_ics_merkle_proof,
+            specs::ProofSpecs,
+        },
         ics24_host::{
             identifier::{ChainId, ChannelId, ClientId, ConnectionId, PortId},
-            path::ChannelEndsPath,
+            path::{ChannelEndsPath, ClientConsensusStatePath},
+            IBC_QUERY_PATH,
         },
     },
     events::IbcEvent,
@@ -99,11 +109,9 @@ where
             .ok_or_else(|| Error::Custom("counterparty returned empty client state".to_string()))?;
 
         let client_state = ClientState::try_from(client_state_response)
-            .map_err(|err| Error::Custom("failed to decode client state response".to_string()))?;
-
+            .map_err(|_| Error::Custom("failed to decode client state response".to_string()))?;
         let latest_cp_client_height = client_state.latest_height().revision_height();
         let latest_height = self.rpc_client.latest_block().await?.block.header.height;
-
         let mut ibc_events: Vec<IbcEventWithHeight> = vec![];
         for height in latest_cp_client_height + 1..latest_height.value() + 1 {
             // todo()! maybe there's a more efficient way to query for blocks in batches?
@@ -117,22 +125,24 @@ where
                         height, e
                     ))
                 })?;
-
-            let tx_results = block_results
-                .txs_results
-                .ok_or_else(|| Error::Custom("empty transaction results".to_string()))
-                .unwrap();
+            let tx_results = match block_results.txs_results {
+                Some(tx) => tx,
+                None => continue,
+            };
             for tx in tx_results.iter() {
                 for event in tx.clone().events {
-                    let ibc_event = ibc_event_try_from_abci_event(&event)?;
-                    ibc_events.push(IbcEventWithHeight::new(
-                        ibc_event,
-                        client_state.latest_height(),
-                    ));
+                    let ibc_event = ibc_event_try_from_abci_event(&event).ok();
+                    match ibc_event {
+                        Some(ev) => {
+                            ibc_events
+                                .push(IbcEventWithHeight::new(ev, client_state.latest_height()));
+                        }
+                        None => continue,
+                    }
                 }
             }
+            log::info!("ibc_events: {:?}", ibc_events);
         }
-
         let update_header =
             CosmosClient::msg_update_client_header(self, client_state.latest_height).await?;
         let update_client_header = {
@@ -256,15 +266,61 @@ where
         client_id: ClientId,
         consensus_height: Height,
     ) -> Result<QueryConsensusStateResponse, Self::Error> {
-        todo!()
+        let keys = format!(
+            "{}",
+            ClientConsensusStatePath {
+                client_id: client_id.clone(),
+                epoch: consensus_height.revision_number(),
+                height: consensus_height.revision_height(),
+            }
+        );
+        let (_, proof) = self.query_path(keys.into_bytes(), at, true).await?;
+        let mut grpc_client = ibc_proto::ibc::core::client::v1::query_client::QueryClient::connect(
+            self.grpc_url.clone().to_string(),
+        )
+        .await
+        .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryConsensusStateRequest {
+            client_id: client_id.to_string(),
+            revision_number: consensus_height.revision_number(),
+            revision_height: consensus_height.revision_height(),
+            latest_height: false,
+        };
+
+        let response = grpc_client
+            .consensus_state(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        let res = response.into_inner();
+        Ok(QueryConsensusStateResponse {
+            consensus_state: res.clone().consensus_state,
+            proof,
+            proof_height: res.proof_height,
+        })
     }
 
     async fn query_client_state(
         &self,
-        at: Height,
+        _at: Height,
         client_id: ClientId,
     ) -> Result<QueryClientStateResponse, Self::Error> {
-        todo!()
+        let mut grpc_client = ibc_proto::ibc::core::client::v1::query_client::QueryClient::connect(
+            self.grpc_url.clone().to_string(),
+        )
+        .await
+        .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryClientStateRequest {
+            client_id: client_id.to_string(),
+        };
+
+        let response = grpc_client
+            .client_state(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+        Ok(response.into_inner())
     }
 
     async fn query_connection_end(
@@ -274,23 +330,21 @@ where
     ) -> Result<QueryConnectionResponse, Self::Error> {
         use ibc_proto::ibc::core::connection::v1 as connection;
         use tonic::IntoRequest;
-
         let mut grpc_client =
             connection::query_client::QueryClient::connect(self.grpc_url.clone().to_string())
                 .await
                 .map_err(|e| Error::from(e.to_string()))?;
 
-        let mut request = connection::QueryConnectionRequest {
+        let request = QueryConnectionRequest {
             connection_id: connection_id.to_string(),
         }
         .into_request();
 
-        let height = at.revision_height().to_string();
-        let height_param = AsciiMetadataValue::try_from(height.as_str()).unwrap();
-
-        request
-            .metadata_mut()
-            .insert("x-cosmos-block-height", height_param);
+        // let height = at.revision_height().to_string();
+        // let height_param = AsciiMetadataValue::try_from(height.as_str()).unwrap();
+        // request
+        //     .metadata_mut()
+        //     .insert("x-cosmos-block-height", height_param);
 
         let response = grpc_client
             .connection(request)
@@ -306,23 +360,48 @@ where
         channel_id: ChannelId,
         port_id: PortId,
     ) -> Result<QueryChannelResponse, Self::Error> {
-        let res = self
-            .query(ChannelEndsPath(port_id, channel_id), at, true)
+        // let res = self
+        //     .query(ChannelEndsPath(port_id, channel_id), at, true)
+        //     .await
+        //     .map_err(|e| Error::from(e.to_string()))?;
+
+        // let channel_end = ChannelEnd::decode_vec(&res.0).map_err(|e| Error::from(e.to_string()))?;
+        // let proof: Vec<u8> = res
+        //     .1
+        //     .ok_or_else(|| Error::from("No proof".to_string()))
+        //     .unwrap()
+        //     .into();
+        // Ok(QueryChannelResponse {
+        //     channel: Some(channel_end.into()),
+        //     proof,
+        //     proof_height: Some(at.into()),
+        // })
+
+        use tonic::IntoRequest;
+        let mut grpc_client =
+            ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+                self.grpc_url.clone().to_string(),
+            )
             .await
             .map_err(|e| Error::from(e.to_string()))?;
 
-        let channel_end =
-            ChannelEnd::decode_vec(&res.value).map_err(|e| Error::from(e.to_string()))?;
+        let request = QueryChannelRequest {
+            channel_id: channel_id.to_string(),
+            port_id: port_id.to_string(),
+        }
+        .into_request();
 
-        Ok(QueryChannelResponse {
-            channel: Some(channel_end.into()),
-            proof: vec![],
-            proof_height: Some(at.into()),
-        })
+        let response = grpc_client
+            .channel(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        Ok(response.into_inner())
     }
 
-    async fn query_proof(&self, at: Height, keys: MerklePath) -> Result<Vec<u8>, Self::Error> {
-        todo!()
+    async fn query_proof(&self, at: Height, keys: Vec<Vec<u8>>) -> Result<Vec<u8>, Self::Error> {
+        let (_, proof) = self.query_path(keys[0].clone(), at, true).await?;
+        Ok(proof)
     }
 
     async fn query_packet_commitment(

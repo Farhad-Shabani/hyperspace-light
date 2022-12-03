@@ -21,7 +21,6 @@ macro_rules! process_finality_event {
                         continue;
                     }
                 };
-                log::info!("Events: {:?}", events);
                 let event_types = events
                     .iter()
                     .map(|ev| ev.event.event_type())

@@ -1,7 +1,6 @@
 use crate::core::packets::{types::PacketInfo, utils::calculate_block_delay};
 use crate::{core::error::Error, cosmos::events::IbcEventWithHeight};
 use futures::stream::Stream;
-use ibc_proto::ibc::core::commitment::v1::MerklePath;
 use ibc_proto::{
     google::protobuf::Any,
     ibc::core::{
@@ -113,7 +112,7 @@ pub trait IbcProvider {
     ) -> Result<QueryChannelResponse, Self::Error>;
 
     /// Query proof for provided key path
-    async fn query_proof(&self, at: Height, keys: MerklePath) -> Result<Vec<u8>, Self::Error>;
+    async fn query_proof(&self, at: Height, keys: Vec<Vec<u8>>) -> Result<Vec<u8>, Self::Error>;
 
     /// Query packet commitment with proof
     async fn query_packet_commitment(
@@ -605,4 +604,10 @@ pub async fn query_maximum_height_for_timeout_proofs(
         }
     }
     min_timeout_height
+}
+
+pub fn apply_prefix(mut commitment_prefix: Vec<u8>, path: String) -> Vec<u8> {
+	let path = path.as_bytes().to_vec();
+	commitment_prefix.extend_from_slice(&path);
+	commitment_prefix
 }

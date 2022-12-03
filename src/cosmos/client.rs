@@ -32,7 +32,7 @@ use ibc_relayer_types::{
         },
         ics24_host::{
             identifier::{ChainId, ChannelId, ClientId, ConnectionId, PortId},
-            Path, IBC_QUERY_PATH,
+            IBC_QUERY_PATH,
         },
     },
     keys::STORE_KEY,
@@ -246,6 +246,81 @@ where
         ))
     }
 
+    /// Uses the GRPC client to retrieve the account sequence
+    pub async fn query_account(&self) -> Result<BaseAccount, Error> {
+        let mut client = QueryClient::connect(self.grpc_url.clone().to_string())
+            .await
+            .map_err(|e| Error::from(format!("GRPC client error: {:?}", e)))?;
+
+        let request = tonic::Request::new(QueryAccountRequest {
+            address: self.keybase.account.to_string(),
+        });
+
+        let response = client.account(request).await;
+
+        // Querying for an account might fail, i.e. if the account doesn't actually exist
+        let resp_account = match response
+            .map_err(|e| Error::from(format!("{:?}", e)))?
+            .into_inner()
+            .account
+        {
+            Some(account) => account,
+            None => return Err(Error::from(format!("Account not found"))),
+        };
+
+        Ok(BaseAccount::decode(resp_account.value.as_slice())
+            .map_err(|e| Error::from(format!("Failed to decode account {}", e)))?)
+    }
+
+    pub async fn query_path(
+        &self,
+        data: Vec<u8>,
+        height_query: Height,
+        prove: bool,
+    ) -> Result<(Vec<u8>, Vec<u8>), Error> {
+        // SAFETY: Creating a Path from a constant; this should never fail
+        let path = tendermint::abci::Path::from_str(IBC_QUERY_PATH)
+            .expect("Turning IBC query path constant into a Tendermint ABCI path");
+
+        let height = TmHeight::try_from(height_query.revision_height())
+            .map_err(|e| Error::from(format!("Invalid height {}", e)))?;
+
+        let height = match height.value() {
+            0 => None,
+            _ => Some(height),
+        };
+
+        // Use the Tendermint-rs RPC client to do the query.
+        let response = self
+            .rpc_client
+            .abci_query(Some(path), data, height, prove)
+            .await
+            .map_err(|e| {
+                Error::from(format!(
+                    "Failed to query chain {} with error {:?}",
+                    self.name, e
+                ))
+            })?;
+
+        if !response.code.is_ok() {
+            // Fail with response log.
+            return Err(Error::from(format!(
+                "Query failed with code {:?} and log {:?}",
+                response.code, response.log
+            )));
+        }
+
+        let merkle_proof = response
+            .proof
+            .map(|p| convert_tm_to_ics_merkle_proof(&p))
+            .ok_or_else(|| Error::Custom(format!("bad client state proof")))?;
+
+        let proof = CommitmentProofBytes::try_from(merkle_proof.unwrap())
+            .map_err(|err| Error::Custom(format!("bad client state proof: {}", err)))?;
+
+        Ok((response.value, proof.into()))
+    }
+
     pub async fn query_tendermint_proof(
         &self,
         key: Vec<u8>,
@@ -302,77 +377,5 @@ where
         let proof = CommitmentProofBytes::try_from(merkle_proof.unwrap())
             .map_err(|err| Error::Custom(format!("bad client state proof: {}", err)))?;
         Ok((query_res.value, proof.into()))
-    }
-
-    /// Uses the GRPC client to retrieve the account sequence
-    pub async fn query_account(&self) -> Result<BaseAccount, Error> {
-        let mut client = QueryClient::connect(self.grpc_url.clone().to_string())
-            .await
-            .map_err(|e| Error::from(format!("GRPC client error: {:?}", e)))?;
-
-        let request = tonic::Request::new(QueryAccountRequest {
-            address: self.keybase.account.to_string(),
-        });
-
-        let response = client.account(request).await;
-
-        // Querying for an account might fail, i.e. if the account doesn't actually exist
-        let resp_account = match response
-            .map_err(|e| Error::from(format!("{:?}", e)))?
-            .into_inner()
-            .account
-        {
-            Some(account) => account,
-            None => return Err(Error::from(format!("Account not found"))),
-        };
-
-        Ok(BaseAccount::decode(resp_account.value.as_slice())
-            .map_err(|e| Error::from(format!("Failed to decode account {}", e)))?)
-    }
-
-    pub async fn query(
-        &self,
-        data: impl Into<Path>,
-        height_query: Height,
-        prove: bool,
-    ) -> Result<AbciQuery, Error> {
-        // SAFETY: Creating a Path from a constant; this should never fail
-        let path = tendermint::abci::Path::from_str(IBC_QUERY_PATH)
-            .expect("Turning IBC query path constant into a Tendermint ABCI path");
-
-        let height = TmHeight::try_from(height_query.revision_height())
-            .map_err(|e| Error::from(format!("Invalid height {}", e)))?;
-
-        let data = data.into();
-        if !data.is_provable() & prove {
-            return Err(Error::from(format!("Cannot prove query for path {}", data)));
-        }
-
-        let height = if height.value() == 0 {
-            None
-        } else {
-            Some(height)
-        };
-
-        // Use the Tendermint-rs RPC client to do the query.
-        let response = self
-            .rpc_client
-            .abci_query(Some(path), data.into_bytes(), height, prove)
-            .await
-            .map_err(|e| {
-                Error::from(format!(
-                    "Failed to query chain {} with error {:?}",
-                    self.name, e
-                ))
-            })?;
-
-        if !response.code.is_ok() {
-            // Fail with response log.
-            return Err(Error::from(format!(
-                "Query failed with code {:?} and log {:?}",
-                response.code, response.log
-            )));
-        }
-        Ok(response)
     }
 }

@@ -41,6 +41,7 @@ use ibc_relayer_types::{
             },
         },
         ics23_commitment::commitment::{CommitmentPrefix, CommitmentProofBytes},
+        ics24_host::path::ConnectionsPath,
     },
     events::{IbcEvent, IbcEventType},
     proofs::{ConsensusProof, Proofs},
@@ -88,15 +89,17 @@ pub async fn parse_events(
 							))
                         })?,
                     )?;
-                    let counterparty = connection_end.counterparty();
+                    let keys = format!("{}", ConnectionsPath(connection_id.clone()));
+                    let proof = source
+                        .query_proof(ev.height, vec![keys.into_bytes()])
+                        .await?;
 
-                    let connection_proof =
-                        CommitmentProofBytes::try_from(connection_response.proof)?;
+                    let counterparty = connection_end.counterparty();
+                    let connection_proof = CommitmentProofBytes::try_from(proof)?;
                     let prefix: CommitmentPrefix = source.connection_prefix();
                     let client_state_response = source
                         .query_client_state(ev.height, open_init.attributes().client_id.clone())
                         .await?;
-
                     let proof_height = connection_response.proof_height.ok_or_else(|| Error::Custom(format!("[get_messages_for_events - open_conn_init] Proof height not found in response")))?;
                     let proof_height =
                         Height::new(proof_height.revision_number, proof_height.revision_height)
@@ -113,6 +116,7 @@ pub async fn parse_events(
                         .client_state
                         .map(ClientState::try_from)
                         .ok_or_else(|| Error::Custom(format!("Client state is empty")))??;
+                    log::info!("🔍 Client state: {:?}", client_state);
                     let consensus_proof = source
                         .query_client_consensus(
                             ev.height,
@@ -122,7 +126,6 @@ pub async fn parse_events(
                         .await?;
                     let consensus_proof =
                         query_consensus_proof(sink, client_state.clone(), consensus_proof).await?;
-
                     // Construct OpenTry
                     let msg = MsgConnectionOpenTry {
                         previous_connection_id: None,
