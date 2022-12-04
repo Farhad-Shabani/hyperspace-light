@@ -1,12 +1,61 @@
+use super::encode::{
+    encode_auth_info, encode_key_bytes, encode_sign_doc, encode_signer_info, encode_tx,
+    encode_tx_body,
+};
+use super::key_provider::KeyEntry;
 use super::provider::TransactionId;
 use crate::core::error::Error;
 use core::time::Duration;
-use ibc_proto::cosmos::tx::v1beta1::service_client::ServiceClient;
-use ibc_proto::cosmos::tx::v1beta1::{SimulateRequest, SimulateResponse, Tx};
+use ibc_proto::{
+    cosmos::auth::v1beta1::BaseAccount,
+    cosmos::tx::v1beta1::{
+        service_client::ServiceClient, Fee, SimulateRequest, SimulateResponse, Tx, TxRaw,
+    },
+    google::protobuf::Any,
+};
+use ibc_relayer_types::core::ics24_host::identifier::ChainId;
+use prost::Message;
 use tendermint::abci::transaction::Hash;
 use tendermint_rpc::endpoint::tx::Response as TxResponse;
 use tendermint_rpc::query::Query;
 use tendermint_rpc::{Client, HttpClient, Order, Url};
+
+pub fn sign_tx(
+    key: KeyEntry,
+    chain_id: ChainId,
+    account_info: &BaseAccount,
+    messages: Vec<Any>,
+    fee: Fee,
+) -> Result<(Tx, TxRaw, Vec<u8>), Error> {
+    let pk_bytes = encode_key_bytes(&key)?;
+    let signer_info = encode_signer_info(account_info.sequence, pk_bytes)?;
+
+    // Create and Encode AuthInfo
+    let (auth_info, auth_info_bytes) = encode_auth_info(signer_info, fee)?;
+
+    // Create and Encode TxBody
+    let (body, body_bytes) = encode_tx_body(messages)?;
+
+    // Create and Encode TxRaw
+    let signature_bytes = encode_sign_doc(
+        key.clone(),
+        body_bytes.clone(),
+        auth_info_bytes.clone(),
+        chain_id.clone(),
+        account_info.account_number,
+    )?;
+
+    // Encode SignDoc and Create Signature
+    let (tx_raw, tx_bytes) = encode_tx(body_bytes, auth_info_bytes, signature_bytes.clone())?;
+
+    let tx = Tx {
+        body: Some(body),
+        auth_info: Some(auth_info),
+        signatures: vec![signature_bytes],
+    };
+
+    Ok((tx, tx_raw, tx_bytes))
+}
 
 pub async fn simulate_tx(
     grpc_url: Url,
@@ -93,4 +142,23 @@ pub async fn confirm_tx(
     Ok(TransactionId {
         hash: response.hash,
     })
+}
+
+pub fn encoded_tx_metrics(
+    key: KeyEntry,
+    chain_id: ChainId,
+    account_info: &BaseAccount,
+    fee: Fee,
+) -> Result<(usize, usize), Error> {
+    let (_, tx_raw, _) = sign_tx(key, chain_id, account_info, vec![], fee)?;
+
+    let total_len = tx_raw.encoded_len();
+    let body_bytes_len = tx_raw.body_bytes.len();
+    let envelope_len = if body_bytes_len == 0 {
+        total_len
+    } else {
+        total_len - 1 - prost::length_delimiter_len(body_bytes_len) - body_bytes_len
+    };
+
+    Ok((total_len, envelope_len))
 }

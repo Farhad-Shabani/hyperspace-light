@@ -76,6 +76,8 @@ pub struct CosmosClient<H> {
     pub account_prefix: String,
     /// Reference to commitment
     pub commitment_prefix: CommitmentPrefix,
+    /// Maximun transaction size
+    pub max_tx_size: usize,
     /// Channels cleared for packet relay
     pub channel_whitelist: Vec<(ChannelId, PortId)>,
     /// Finality protocol to use, eg Tenderminet
@@ -102,6 +104,8 @@ pub struct CosmosClientConfig {
     pub account_prefix: String,
     /// Store prefix
     pub store_prefix: String,
+    /// Maximun transaction size
+    pub max_tx_size: usize,
     /// The key that signs transactions
     pub keybase: KeyEntry,
     /*
@@ -115,7 +119,6 @@ pub struct CosmosClientConfig {
     pub gas_multiplier: Option<GasMultiplier>,  //TODO: Could be set to `1.1` by default
     pub fee_granter: Option<String>,            //TODO: DEFAULT_FEE_GRANTER: &str = ""
     pub max_msg_num: MaxMsgNum,                 //TODO: Default is 30, Could be set usize = 1 for test
-    pub max_tx_size: MaxTxSize,					//TODO: Default is usize = 180000, pub memo_prefix: Memo
                                                 //TODO: Could be set to const MAX_LEN: usize = 50;
     pub proof_specs: Option<ProofSpecs>,        //TODO: Could be set to None
     pub sequential_batch_tx: bool,			    //TODO: sequential_send_batched_messages_and_wait_commit() or send_batched_messages_and_wait_commit() ?
@@ -156,6 +159,7 @@ where
             light_client,
             account_prefix: config.account_prefix,
             commitment_prefix,
+            max_tx_size: config.max_tx_size,
             keybase: config.keybase,
             channel_whitelist: vec![],
             _phantom: std::marker::PhantomData,

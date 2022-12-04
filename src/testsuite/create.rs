@@ -44,9 +44,9 @@ pub async fn create_clients(
         type_url: msg.type_url(),
         value: msg.encode_vec()?,
     };
-    log::info!(target: "hyperspace-light", "📡 Sending MsgCreateClient to chain A");
+    log::info!(target: "hyperspace-light", "📡 Sending to chain_a following message: {:?}", msg.type_url);
     let tx_id = chain_a.submit(vec![msg]).await?;
-    log::info!(target: "hyperspace-light", "🚀 Transaction confirmed with hash: {:?}", tx_id);
+    log::info!(target: "hyperspace-light", "🤝 Transaction confirmed with hash: {:?}", tx_id);
     let client_id_b_on_a = chain_a.query_client_id_from_tx_hash(tx_id).await?;
 
     let msg = MsgCreateClient {
@@ -59,9 +59,9 @@ pub async fn create_clients(
         value: msg.encode_vec()?,
     };
 
-    log::info!(target: "hyperspace-light", "📡 Sending MsgCreateClient to chain b");
+    log::info!(target: "hyperspace-light", "📡 Sending to chain_b following message: {:?}", msg.type_url);
     let tx_id = chain_b.submit(vec![msg]).await?;
-    log::info!(target: "hyperspace-light", "🚀 Transaction confirmed with hash: {:?}", tx_id);
+    log::info!(target: "hyperspace-light", "🤝 Transaction confirmed with hash: {:?}", tx_id);
     let client_id_a_on_b = chain_b.query_client_id_from_tx_hash(tx_id).await?;
 
     Ok((client_id_a_on_b, client_id_b_on_a))
@@ -82,11 +82,12 @@ pub async fn create_connection(
         signer: chain_a.account_id(),
     };
 
-    log::info!(target: "hyperspace-light", "📡 Sending MsgConnectionOpenInit to chain A");
-    chain_a.submit(vec![msg.to_any()]).await?;
+    log::info!(target: "hyperspace-light", "📡 Sending to chain_a following message: {:?}", msg.type_url());
+    let tx_id = chain_a.submit(vec![msg.to_any()]).await?;
+    log::info!(target: "hyperspace-light", "🤝 Transaction confirmed with hash: {:?}", tx_id);
 
     // wait till both chains have completed connection handshake
-    log::info!(target: "hyperspace-light", "🏗️ Waiting for connection handshake to complete =================================== ");
+    log::info!(target: "hyperspace-light", "🏗️🏗️🏗️ ================ Waiting for connection handshake to complete ================ ");
     let future = chain_b
         .ibc_events()
         .await
@@ -138,10 +139,11 @@ pub async fn create_channel(
 
     let msg = MsgChannelOpenInit::new(port_id, channel, chain_a.account_id());
 
-    log::info!(target: "hyperspace-light", "📡 Sending MsgChannelOpenInit to chain A");
-    chain_a.submit(vec![msg.to_any()]).await?;
+    log::info!(target: "hyperspace-light", "📡 Sending to chain_a following message: {:?}", msg.type_url());
+    let tx_id = chain_a.submit(vec![msg.to_any()]).await?;
+    log::info!(target: "hyperspace-light", "🤝 Transaction confirmed with hash: {:?}", tx_id);
 
-    log::info!(target: "hyperspace-light", "🏗️ Waiting for channel handshake to complete =================================== ");
+    log::info!(target: "hyperspace-light", "🏗️🏗️🏗️ ================ Waiting for channel handshake to complete ================ ");
     let future = chain_b
         .ibc_events()
         .await

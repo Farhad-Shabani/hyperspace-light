@@ -1,6 +1,5 @@
 use super::key_provider::KeyEntry;
 use crate::core::error::Error;
-use ibc_proto::cosmos::tx::v1beta1::Tx;
 use ibc_proto::{
     cosmos::tx::v1beta1::{
         mode_info::{Single, Sum},
@@ -90,25 +89,18 @@ pub fn encode_tx_body(messages: Vec<Any>) -> Result<(TxBody, Vec<u8>), Error> {
 }
 
 pub fn encode_tx(
-    body: TxBody,
     body_bytes: Vec<u8>,
-    auth_info: AuthInfo,
     auth_info_bytes: Vec<u8>,
     signature_bytes: Vec<u8>,
-) -> Result<(Tx, Vec<u8>), Error> {
+) -> Result<(TxRaw, Vec<u8>), Error> {
     // Create and Encode TxRaw
     let tx_raw = TxRaw {
         body_bytes,
         auth_info_bytes,
-        signatures: vec![signature_bytes.clone()],
+        signatures: vec![signature_bytes],
     };
     let mut tx_bytes = Vec::new();
     Message::encode(&tx_raw, &mut tx_bytes).map_err(|e| Error::from(e.to_string()))?;
 
-    let tx = Tx {
-        body: Some(body),
-        auth_info: Some(auth_info),
-        signatures: vec![signature_bytes],
-    };
-    Ok((tx, tx_bytes))
+    Ok((tx_raw, tx_bytes))
 }

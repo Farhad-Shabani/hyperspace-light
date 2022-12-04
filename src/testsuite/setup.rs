@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 
 pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<H>, CosmosClient<H>)
 {
-    log::info!(target: "hyperspace-light", "============================== Starting Test ==============================");
+    log::info!(target: "hyperspace-light", "================================= Starting Test =================================");
 
     // Create client configurations
     // Parameters have been set up to work with local nodes according to https://hermes.informal.systems/tutorials
@@ -33,6 +33,7 @@ pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<
         connection_id: None,
         account_prefix: "cosmos".to_string(),
         store_prefix: "ibc".to_string(),
+        max_tx_size: 180000,
         keybase: KeyEntry::from_file(
             PathBuf::from_str("/Users/farhad/.hermes/keys/ibc-0/keyring-test/wallet.json").unwrap(),
         )
@@ -49,6 +50,7 @@ pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<
         connection_id: None,
         account_prefix: "cosmos".to_string(),
         store_prefix: "ibc".to_string(),
+        max_tx_size: 180000,
         keybase: KeyEntry::from_file(
             PathBuf::from_str("/Users/farhad/.hermes/keys/ibc-1/keyring-test/wallet.json").unwrap(),
         )
@@ -59,7 +61,7 @@ pub async fn setup_clients<H: Clone + Send + Sync + 'static>() -> (CosmosClient<
     let mut chain_b = CosmosClient::<H>::new(config_b).await.unwrap();
 
     // Wait until for cosmos to start producing blocks
-    log::info!(target: "hyperspace-light", "🏗️ Waiting for block production from Cosmos chains ========================= ");
+    log::info!(target: "hyperspace-light", "🏗️🏗️🏗️ ============== Waiting for block production from Cosmos chains ============== ");
     let new_block_chain_a = chain_a
         .ibc_events()
         .await
@@ -184,7 +186,7 @@ where
         .unwrap();
     log::info!(target: "hyperspace-light", "🤝 Connection handshake completed: ConnectionId({connection_id}) ============");
 
-    log::info!(target: "hyperspace-light", "🏗️ Starting channel handshake ===========================");
+    log::info!(target: "hyperspace-light", "🏗️🏗️🏗️  Starting channel handshake ===========================");
     let (channel_id_a, channel_id_b) = create_channel(
         chain_a,
         chain_b,

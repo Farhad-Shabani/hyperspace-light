@@ -27,7 +27,6 @@ macro_rules! process_finality_event {
                 let (mut messages, timeouts) =
                     crate::core::events::parse_events(&mut $source, &mut $sink, events).await?;
                 log::info!(target: "hyperspace-light", "🧾 {} events from {}", event_types.len(), $source.name());
-                log::info!(target: "hyperspace-light", "🧾 {} messages to be sent to {}", messages.len(), $sink.name());
                 if !timeouts.is_empty() {
                     let type_urls = timeouts
                         .iter()
@@ -56,7 +55,7 @@ macro_rules! process_finality_event {
                         $source.name()
                     ),
                     _ => log::info!(
-                        "Received finalized events from: {} {event_types:#?}",
+                        target: "hyperspace-light", "🧾 Received finalized events from {}: {event_types:#?}",
                         $source.name()
                     ),
                 };
@@ -66,7 +65,7 @@ macro_rules! process_finality_event {
                     .iter()
                     .map(|msg| msg.type_url.as_str())
                     .collect::<Vec<_>>();
-                log::info!(target: "hyperspace-light", "🏗️ Sending {} messages to {}", type_urls.len(), $sink.name());
+                log::info!(target: "hyperspace-light", "📡 Sending to {} following messages: {:?}", $sink.name(), type_urls);
                 crate::core::queue::flush_message_batch(messages, &$sink).await?;
             }
         }

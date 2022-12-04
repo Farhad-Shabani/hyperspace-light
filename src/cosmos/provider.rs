@@ -143,8 +143,9 @@ where
                 }
             }
         }
-        let update_header =
-            CosmosClient::msg_update_client_header(self, client_state.latest_height).await?;
+        let update_header = self
+            .msg_update_client_header(client_state.latest_height)
+            .await?;
         let update_client_header = {
             let msg = MsgUpdateClient {
                 client_id: self.client_id(),
