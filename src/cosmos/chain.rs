@@ -79,13 +79,6 @@ where
             }
             current_count += 1;
             current_len += tagged_len;
-            log::info!(
-                "Message {} has length {} ({} + {})",
-                current_count,
-                tagged_len,
-                message_len,
-                1 + prost::length_delimiter_len(message_len)
-            );
         }
         Ok(current_len as u64)
     }

@@ -11,6 +11,7 @@ use futures::{
     stream::{self, select_all},
     Stream, StreamExt,
 };
+use ibc_proto::cosmos::bank::v1beta1::QueryBalanceRequest;
 use ibc_proto::ibc::core::channel::v1::QueryChannelRequest;
 use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest;
 use ibc_proto::{
@@ -34,7 +35,7 @@ use ibc_proto::{
     protobuf::Protobuf,
 };
 use ibc_relayer_types::{
-    applications::transfer::PrefixedCoin,
+    applications::transfer::{Amount, PrefixedCoin, PrefixedDenom},
     clients::ics07_tendermint::{
         client_state::{AllowUpdate, ClientState},
         consensus_state::ConsensusState,
@@ -44,16 +45,10 @@ use ibc_relayer_types::{
             client_type::ClientType, events as ClientEvents, msgs::update_client::MsgUpdateClient,
             trust_threshold::TrustThreshold,
         },
-        ics04_channel::channel::ChannelEnd,
-        ics23_commitment::{
-            commitment::{CommitmentPrefix, CommitmentProofBytes},
-            merkle::convert_tm_to_ics_merkle_proof,
-            specs::ProofSpecs,
-        },
+        ics23_commitment::{commitment::CommitmentPrefix, specs::ProofSpecs},
         ics24_host::{
             identifier::{ChainId, ChannelId, ClientId, ConnectionId, PortId},
-            path::{ChannelEndsPath, ClientConsensusStatePath},
-            IBC_QUERY_PATH,
+            path::{ChannelEndsPath, ClientConsensusStatePath, ClientStatePath, ConnectionsPath},
         },
     },
     events::IbcEvent,
@@ -267,15 +262,6 @@ where
         client_id: ClientId,
         consensus_height: Height,
     ) -> Result<QueryConsensusStateResponse, Self::Error> {
-        let keys = format!(
-            "{}",
-            ClientConsensusStatePath {
-                client_id: client_id.clone(),
-                epoch: consensus_height.revision_number(),
-                height: consensus_height.revision_height(),
-            }
-        );
-        let (_, proof) = self.query_path(keys.into_bytes(), at, true).await?;
         let mut grpc_client = ibc_proto::ibc::core::client::v1::query_client::QueryClient::connect(
             self.grpc_url.clone().to_string(),
         )
@@ -292,19 +278,29 @@ where
         let response = grpc_client
             .consensus_state(request)
             .await
-            .map_err(|e| Error::from(e.to_string()))?;
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
 
-        let res = response.into_inner();
+        let keys = format!(
+            "{}",
+            ClientConsensusStatePath {
+                client_id: client_id.clone(),
+                epoch: consensus_height.revision_number(),
+                height: consensus_height.revision_height(),
+            }
+        );
+        let (_, proof) = self.query_path(keys.into_bytes(), at, true).await?;
+
         Ok(QueryConsensusStateResponse {
-            consensus_state: res.clone().consensus_state,
+            consensus_state: response.consensus_state,
             proof,
-            proof_height: res.proof_height,
+            proof_height: response.proof_height,
         })
     }
 
     async fn query_client_state(
         &self,
-        _at: Height,
+        at: Height,
         client_id: ClientId,
     ) -> Result<QueryClientStateResponse, Self::Error> {
         let mut grpc_client = ibc_proto::ibc::core::client::v1::query_client::QueryClient::connect(
@@ -320,8 +316,17 @@ where
         let response = grpc_client
             .client_state(request)
             .await
-            .map_err(|e| Error::from(e.to_string()))?;
-        Ok(response.into_inner())
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
+
+        let keys = format!("{}", ClientStatePath(client_id.clone()));
+        let proof = self.query_proof(at, vec![keys.into_bytes()]).await?;
+
+        Ok(QueryClientStateResponse {
+            client_state: response.client_state,
+            proof,
+            proof_height: response.proof_height,
+        })
     }
 
     async fn query_connection_end(
@@ -350,9 +355,17 @@ where
         let response = grpc_client
             .connection(request)
             .await
-            .map_err(|e| Error::from(e.to_string()))?;
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
 
-        Ok(response.into_inner())
+        let keys = format!("{}", ConnectionsPath(connection_id.clone()));
+        let proof = self.query_proof(at, vec![keys.into_bytes()]).await?;
+
+        Ok(QueryConnectionResponse {
+            connection: response.connection,
+            proof,
+            proof_height: response.proof_height,
+        })
     }
 
     async fn query_channel_end(
@@ -361,23 +374,6 @@ where
         channel_id: ChannelId,
         port_id: PortId,
     ) -> Result<QueryChannelResponse, Self::Error> {
-        // let res = self
-        //     .query(ChannelEndsPath(port_id, channel_id), at, true)
-        //     .await
-        //     .map_err(|e| Error::from(e.to_string()))?;
-
-        // let channel_end = ChannelEnd::decode_vec(&res.0).map_err(|e| Error::from(e.to_string()))?;
-        // let proof: Vec<u8> = res
-        //     .1
-        //     .ok_or_else(|| Error::from("No proof".to_string()))
-        //     .unwrap()
-        //     .into();
-        // Ok(QueryChannelResponse {
-        //     channel: Some(channel_end.into()),
-        //     proof,
-        //     proof_height: Some(at.into()),
-        // })
-
         use tonic::IntoRequest;
         let mut grpc_client =
             ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
@@ -395,9 +391,17 @@ where
         let response = grpc_client
             .channel(request)
             .await
-            .map_err(|e| Error::from(e.to_string()))?;
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
 
-        Ok(response.into_inner())
+        let keys = format!("{}", ChannelEndsPath(port_id.clone(), channel_id.clone()));
+        let proof = self.query_proof(at, vec![keys.into_bytes()]).await?;
+
+        Ok(QueryChannelResponse {
+            channel: response.channel,
+            proof,
+            proof_height: response.proof_height,
+        })
     }
 
     async fn query_proof(&self, at: Height, keys: Vec<Vec<u8>>) -> Result<Vec<u8>, Self::Error> {
@@ -518,7 +522,7 @@ where
             )
             .await
             .map_err(|e| Error::from(format!("{:?}", e)))?;
-
+        log::info!("Querying channels for connection {}", connection_id);
         let request = tonic::Request::new(QueryConnectionChannelsRequest {
             connection: connection_id.to_string(),
             pagination: None,
@@ -529,7 +533,7 @@ where
             .await
             .map_err(|e| Error::from(format!("{:?}", e)))?
             .into_inner();
-
+        log::info!("Channel response: {:?}", response);
         let channels = QueryChannelsResponse {
             channels: response.channels,
             pagination: response.pagination,
@@ -577,7 +581,33 @@ where
     }
 
     async fn query_ibc_balance(&self) -> Result<Vec<PrefixedCoin>, Self::Error> {
-        todo!()
+        let denom = "stake";
+        let mut grpc_client = ibc_proto::cosmos::bank::v1beta1::query_client::QueryClient::connect(
+            self.grpc_url.clone().to_string(),
+        )
+        .await
+        .map_err(|e| Error::from(format!("{:?}", e)))?;
+
+        let request = tonic::Request::new(QueryBalanceRequest {
+            address: self.keybase.clone().account,
+            denom: denom.to_string(),
+        });
+
+        let response = grpc_client
+            .balance(request)
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| Error::from(format!("{:?}", e)))?;
+
+        // Querying for a balance might fail, i.e. if the account doesn't actually exist
+        let balance = response
+            .balance
+            .ok_or_else(|| Error::from(format!("No balance for denom {}", denom)))?;
+
+        Ok(vec![PrefixedCoin {
+            denom: PrefixedDenom::from_str(balance.denom.as_str()).unwrap(),
+            amount: Amount::from_str(balance.amount.as_str()).unwrap(),
+        }])
     }
 
     fn connection_prefix(&self) -> CommitmentPrefix {

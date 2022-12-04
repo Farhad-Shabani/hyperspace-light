@@ -80,7 +80,6 @@ where
         .expect("Can't query ibc balance")
         .pop()
         .expect("No Ibc balances");
-
     let amount = parse_amount(balance.amount.to_string());
     let coin = PrefixedCoin {
         denom: balance.denom,

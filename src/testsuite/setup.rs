@@ -149,7 +149,6 @@ where
         if delay_period != connection_delay {
             continue;
         }
-
         let channels = chain_a
             .query_connection_channels(latest_height, &connection_id)
             .await

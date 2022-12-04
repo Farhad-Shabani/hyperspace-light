@@ -41,7 +41,6 @@ use ibc_relayer_types::{
             },
         },
         ics23_commitment::commitment::{CommitmentPrefix, CommitmentProofBytes},
-        ics24_host::path::ConnectionsPath,
     },
     events::{IbcEvent, IbcEventType},
     proofs::{ConsensusProof, Proofs},
@@ -89,13 +88,9 @@ pub async fn parse_events(
 							))
                         })?,
                     )?;
-                    let keys = format!("{}", ConnectionsPath(connection_id.clone()));
-                    let proof = source
-                        .query_proof(ev.height, vec![keys.into_bytes()])
-                        .await?;
-
                     let counterparty = connection_end.counterparty();
-                    let connection_proof = CommitmentProofBytes::try_from(proof)?;
+                    let connection_proof =
+                        CommitmentProofBytes::try_from(connection_response.proof)?;
                     let prefix: CommitmentPrefix = source.connection_prefix();
                     let client_state_response = source
                         .query_client_state(ev.height, open_init.attributes().client_id.clone())
@@ -127,7 +122,7 @@ pub async fn parse_events(
                         query_consensus_proof(sink, client_state.clone(), consensus_proof).await?;
                     // Construct OpenTry
                     let msg = MsgConnectionOpenTry {
-                        previous_connection_id: None,
+                        previous_connection_id: counterparty.connection_id.clone(),
                         client_id: counterparty.client_id().clone(),
                         // client state proof is mandatory in conn_open_try
                         client_state: Some(client_state.clone().into()),
@@ -150,7 +145,6 @@ pub async fn parse_events(
                         delay_period: connection_end.delay_period(),
                         signer: sink.account_id(),
                     };
-
                     let value = msg.encode_vec().map_err(|e| {
                         Error::Custom(format!(
                             "[get_messages_for_events - open_conn_init] Error encoding message: {:?}",
