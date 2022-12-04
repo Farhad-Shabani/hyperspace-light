@@ -293,7 +293,7 @@ pub trait IbcProvider {
 #[async_trait::async_trait]
 pub trait TestProvider: Chain + Clone + 'static {
     /// Initiate an ibc transfer on chain.
-    async fn send_transfer(&self, params: MsgTransfer<PrefixedCoin>) -> Result<(), Self::Error>;
+    async fn send_transfer(&self, params: MsgTransfer) -> Result<(), Self::Error>;
 
     /// Send a packet on an ordered channel
     async fn send_ordered_packet(

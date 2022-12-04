@@ -3,7 +3,6 @@ use super::encode::{
     encode_tx_body,
 };
 use super::key_provider::KeyEntry;
-use super::provider::TransactionId;
 use crate::core::error::Error;
 use core::time::Duration;
 use ibc_proto::{
@@ -81,23 +80,15 @@ pub async fn simulate_tx(
     Ok(response)
 }
 
-pub async fn broadcast_tx(
-    rpc_client: &HttpClient,
-    tx_bytes: Vec<u8>,
-) -> Result<TransactionId<Hash>, Error> {
+pub async fn broadcast_tx(rpc_client: &HttpClient, tx_bytes: Vec<u8>) -> Result<Hash, Error> {
     let response = rpc_client
         .broadcast_tx_sync(tx_bytes.into())
         .await
         .map_err(|e| Error::from(format!("failed to broadcast transaction {:?}", e)))?;
-    Ok(TransactionId {
-        hash: response.hash,
-    })
+    Ok(response.hash)
 }
 
-pub async fn confirm_tx(
-    rpc_client: &HttpClient,
-    tx_hash: Hash,
-) -> Result<TransactionId<Hash>, Error> {
+pub async fn confirm_tx(rpc_client: &HttpClient, tx_hash: Hash) -> Result<Hash, Error> {
     let start_time = tokio::time::Instant::now();
     let timeout = Duration::from_millis(30000);
     const WAIT_BACKOFF: Duration = Duration::from_millis(300);
@@ -138,10 +129,7 @@ pub async fn confirm_tx(
             tx_hash, response_code
         )));
     }
-
-    Ok(TransactionId {
-        hash: response.hash,
-    })
+    Ok(response.hash)
 }
 
 pub fn encoded_tx_metrics(

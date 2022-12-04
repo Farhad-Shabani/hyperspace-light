@@ -4,8 +4,9 @@ use super::setup::setup_connection_and_channel;
 use crate::core::primitives::TestProvider;
 use crate::core::relay::relay;
 use futures::{future, StreamExt};
+use ibc_proto::cosmos::base::v1beta1::Coin;
 use ibc_relayer_types::{
-    applications::transfer::{msgs::transfer::MsgTransfer, Amount, PrefixedCoin},
+    applications::transfer::msgs::transfer::MsgTransfer,
     core::{
         ics04_channel::timeout::TimeoutHeight,
         ics24_host::identifier::{ChannelId, PortId},
@@ -13,7 +14,7 @@ use ibc_relayer_types::{
     events::IbcEvent,
     timestamp::Timestamp,
 };
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 
 /// Send a packet over a connection with a connection delay and assert the sending chain only sees
 /// the packet after the delay has elapsed.
@@ -52,6 +53,7 @@ where
     B::FinalityEvent: Send + Sync,
     B::Error: From<A::Error>,
 {
+    log::info!(target: "hyperspace-light", "📡 Sending packet with connection delay");
     let (previous_balance, ..) = send_transfer(chain_a, chain_b, channel_id.clone()).await;
     assert_send_transfer(chain_a, previous_balance, 20 * 60).await;
     // now send from chain b.
@@ -61,11 +63,7 @@ where
 }
 
 /// Attempts to send 20% of funds of chain_a's signer to chain b's signer.
-async fn send_transfer<A, B>(
-    chain_a: &A,
-    chain_b: &B,
-    channel_id: ChannelId,
-) -> (u128, MsgTransfer<PrefixedCoin>)
+async fn send_transfer<A, B>(chain_a: &A, chain_b: &B, channel_id: ChannelId) -> (u128, MsgTransfer)
 where
     A: TestProvider,
     A::FinalityEvent: Send + Sync,
@@ -80,10 +78,10 @@ where
         .expect("Can't query ibc balance")
         .pop()
         .expect("No Ibc balances");
-    let amount = parse_amount(balance.amount.to_string());
-    let coin = PrefixedCoin {
-        denom: balance.denom,
-        amount: Amount::from_str(&format!("{}", (amount * 20) / 100)).expect("Infallible"),
+    let amount = parse_amount(balance.amount.to_string()) / 100;
+    let coin = Coin {
+        denom: balance.denom.to_string(),
+        amount: amount.to_string(),
     };
 
     let (height_offset, time_offset) = (200, 60 * 60);

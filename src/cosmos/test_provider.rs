@@ -3,19 +3,21 @@ use crate::core::primitives::TestProvider;
 use core::pin::Pin;
 use futures::Stream;
 use ibc_relayer_types::{
-    applications::transfer::{msgs::transfer::MsgTransfer, PrefixedCoin},
+    applications::transfer::msgs::transfer::MsgTransfer,
     core::ics24_host::identifier::{ChannelId, PortId},
+    tx_msg::Msg,
 };
 
 #[async_trait::async_trait]
-
 impl<H> TestProvider for CosmosClient<H>
 where
     H: Clone + Send + Sync + 'static,
 {
     /// Initiate an ibc transfer on chain.
-    async fn send_transfer(&self, params: MsgTransfer<PrefixedCoin>) -> Result<(), Self::Error> {
-        todo!()
+    async fn send_transfer(&self, msg: MsgTransfer) -> Result<(), Self::Error> {
+        let hash = self.submit_call(vec![msg.to_any()]).await?;
+        log::info!(target: "hyperspace-light", "🤝 Transfer confirmed with hash: {}", hash);
+        Ok(())
     }
 
     /// Send a packet on an ordered channel

@@ -14,12 +14,16 @@
 #![allow(clippy::all)]
 use super::key_provider::KeyEntry;
 use super::light_client::LightClient;
+use super::tx::{broadcast_tx, confirm_tx, sign_tx, simulate_tx};
 use crate::core::error::Error;
 use crate::core::primitives::{IbcProvider, KeyProvider, UpdateType};
 use core::convert::{From, Into, TryFrom};
 use ibc_proto::cosmos::auth::v1beta1::{
     query_client::QueryClient, BaseAccount, QueryAccountRequest,
 };
+use ibc_proto::cosmos::base::v1beta1::Coin;
+use ibc_proto::cosmos::tx::v1beta1::Fee;
+use ibc_proto::google::protobuf::Any;
 use ibc_relayer_types::{
     clients::ics07_tendermint::{
         client_state::ClientState, consensus_state::ConsensusState, header::Header,
@@ -39,6 +43,7 @@ use ibc_relayer_types::{
 };
 use prost::Message;
 use serde::Deserialize;
+use tendermint::abci::transaction::Hash;
 use std::str::FromStr;
 use tendermint::{
     abci::{Code, Path as TendermintABCIPath},
@@ -198,8 +203,34 @@ where
         todo!()
     }
 
-    pub async fn submit_call(&self) -> Result<(), Error> {
-        todo!()
+    pub async fn submit_call(&self, messages: Vec<Any>) -> Result<Hash, Error> {
+        let account_info = self.query_account().await?;
+
+        // Sign transaction
+        let (tx, _, tx_bytes) = sign_tx(
+            self.keybase.clone(),
+            self.chain_id.clone(),
+            &account_info,
+            messages,
+            Fee {
+                amount: vec![Coin {
+                    denom: "stake".to_string(), //TODO: This could be added to the config
+                    amount: "4000".to_string(), //TODO: This could be added to the config
+                }],
+                gas_limit: 400000_u64, //TODO: This could be added to the config
+                payer: "".to_string(),
+                granter: "".to_string(),
+            },
+        )?;
+
+        // Simulate transaction
+        let _ = simulate_tx(self.grpc_url.clone(), tx, tx_bytes.clone()).await?;
+
+        // Broadcast transaction
+        let hash = broadcast_tx(&self.rpc_client, tx_bytes).await?;
+
+        // wait for confirmation
+        confirm_tx(&self.rpc_client, hash).await
     }
 
     pub async fn msg_update_client_header(

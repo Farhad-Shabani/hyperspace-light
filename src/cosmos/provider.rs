@@ -522,7 +522,6 @@ where
             )
             .await
             .map_err(|e| Error::from(format!("{:?}", e)))?;
-        log::info!("Querying channels for connection {}", connection_id);
         let request = tonic::Request::new(QueryConnectionChannelsRequest {
             connection: connection_id.to_string(),
             pagination: None,
@@ -533,7 +532,6 @@ where
             .await
             .map_err(|e| Error::from(format!("{:?}", e)))?
             .into_inner();
-        log::info!("Channel response: {:?}", response);
         let channels = QueryChannelsResponse {
             channels: response.channels,
             pagination: response.pagination,

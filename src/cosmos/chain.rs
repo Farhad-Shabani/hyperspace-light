@@ -1,5 +1,5 @@
 use super::client::CosmosClient;
-use super::tx::{broadcast_tx, confirm_tx, sign_tx, simulate_tx};
+use super::tx::sign_tx;
 use crate::core::error::Error;
 use crate::core::primitives::{Chain, IbcProvider};
 use crate::cosmos::provider::FinalityEvent;
@@ -100,8 +100,8 @@ where
         let stream = subscription.filter_map(|event| {
             let Event {
                 data,
-                events,
-                query,
+                events: _,
+                query: _,
             } = event
                 .map_err(|e| Error::from(format!("failed to get event {:?}", e)))
                 .unwrap();
@@ -116,32 +116,7 @@ where
     }
 
     async fn submit(&self, messages: Vec<Any>) -> Result<Self::TransactionId, Error> {
-        let account_info = self.query_account().await?;
-
-        // Sign transaction
-        let (tx, _, tx_bytes) = sign_tx(
-            self.keybase.clone(),
-            self.chain_id.clone(),
-            &account_info,
-            messages,
-            Fee {
-                amount: vec![Coin {
-                    denom: "stake".to_string(), //TODO: This could be added to the config
-                    amount: "4000".to_string(), //TODO: This could be added to the config
-                }],
-                gas_limit: 400000_u64, //TODO: This could be added to the config
-                payer: "".to_string(),
-                granter: "".to_string(),
-            },
-        )?;
-
-        // Simulate transaction
-        let _ = simulate_tx(self.grpc_url.clone(), tx, tx_bytes.clone()).await?;
-
-        // Broadcast transaction
-        let tx_id = broadcast_tx(&self.rpc_client, tx_bytes).await?;
-
-        // wait for confirmation
-        confirm_tx(&self.rpc_client, tx_id.hash).await
+        let hash = self.submit_call(messages).await?;
+        Ok(Self::TransactionId { hash })
     }
 }
