@@ -8,6 +8,7 @@ use ibc_proto::cosmos::base::v1beta1::Coin;
 use ibc_proto::{cosmos::tx::v1beta1::Fee, google::protobuf::Any};
 use prost::Message;
 use std::pin::Pin;
+use tendermint::block::Height as TmHeight;
 use tendermint_rpc::{
     event::Event,
     event::EventData,
@@ -105,11 +106,12 @@ where
             } = event
                 .map_err(|e| Error::from(format!("failed to get event {:?}", e)))
                 .unwrap();
-            let header = match data {
-                EventData::NewBlock { block, .. } => block.unwrap().header,
+            let height = match data {
+                EventData::NewBlock { block, .. } => block.unwrap().header.height,
+                // EventData::Tx { tx_result } => TmHeight::try_from(tx_result.height).unwrap(),
                 _ => unreachable!(),
             };
-            futures::future::ready(Some(FinalityEvent::Tendermint(header)))
+            futures::future::ready(Some(FinalityEvent::Tendermint(height)))
         });
 
         Box::pin(stream)

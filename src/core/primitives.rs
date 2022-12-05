@@ -58,7 +58,7 @@ pub trait Chain: IbcProvider + KeyProvider + Send + Sync {
 #[async_trait::async_trait]
 pub trait IbcProvider {
     /// Finality event type, passed on to [`Chain::query_latest_ibc_events`]
-    type FinalityEvent;
+    type FinalityEvent: Clone + Send + Sync + std::fmt::Debug;
 
     /// A representation of the transaction id for the chain
     type TransactionId: Clone + Send + Sync + std::fmt::Debug;

@@ -23,11 +23,10 @@ pub async fn flush_message_batch(msgs: Vec<Any>, sink: &impl Chain) -> Result<()
     let ratio = (batch_weight / block_max_weight) as usize;
     if ratio == 0 {
         // log::info!(target: "hyperspace-light", "📡 Sending all messages as one batch");
-        for msg in msgs {
-            log::info!(target: "hyperspace-light", "📡 Sending message");
-            let tx_id = sink.submit(vec![msg]).await?;
-            log::info!(target: "hyperspace-light", "🤝 Transaction confirmed with hash: {:?}", tx_id);
-        }
+        // for msg in msgs {
+        let tx_id = sink.submit(msgs).await?;
+        log::info!(target: "hyperspace-light", "🤝 Transaction flushed successfully with hash: {:?}", tx_id);
+        // }
         return Ok(());
     }
 

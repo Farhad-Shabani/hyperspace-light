@@ -65,10 +65,7 @@ use ibc_relayer_types::{
 };
 use std::pin::Pin;
 use std::str::FromStr;
-use tendermint::{
-    block::{Header, Height as TmHeight},
-    Time,
-};
+use tendermint::{block::Height as TmHeight, Time};
 use tendermint_rpc::{
     endpoint::tx::Response,
     event::{Event, EventData},
@@ -77,8 +74,10 @@ use tendermint_rpc::{
 };
 use tonic::metadata::AsciiMetadataValue;
 use tonic::IntoRequest;
+
+#[derive(Clone, Debug)]
 pub enum FinalityEvent {
-    Tendermint(Header),
+    Tendermint(TmHeight),
 }
 
 #[derive(Clone, Debug)]
@@ -419,7 +418,7 @@ where
         let proof = self
             .query_proof(at, vec![format!("{}", path).into_bytes()])
             .await?;
-        
+
         Ok(QueryChannelResponse {
             channel: response.channel,
             proof,

@@ -138,11 +138,12 @@ pub async fn parse_events(
                                 client_state.latest_height(),
                             )?),
                             None,
-                            proof_height,
+                            proof_height.increment(),
                         )?,
                         delay_period: connection_end.delay_period(),
                         signer: sink.account_id(),
                     };
+                    log::info!("MsgConnectionOpenTry: {:?}", msg);
                     let value = msg.encode_vec().map_err(|e| {
                         Error::Custom(format!(
                             "[get_messages_for_events - open_conn_init] Error encoding message: {:?}",
@@ -235,7 +236,7 @@ pub async fn parse_events(
 							.clone(),
 						signer: sink.account_id(),
 					};
-
+                    log::info!("MsgConnectionOpenAck: {:?}", msg);
                     let value = msg.encode_vec().map_err(|e| {
                         Error::Custom(format!(
                             "[get_messages_for_events - open_conn_try] Error encoding message: {:?}",
@@ -293,7 +294,7 @@ pub async fn parse_events(
 
 						signer: sink.account_id(),
 					};
-
+                    log::info!("MsgConnectionOpenConfirm: {:?}", msg);
                     let value = msg.encode_vec().map_err(|e| {
                         Error::Custom(format!(
                             "[get_messages_for_events - open_conn_ack] Error encoding message: {:?}",
@@ -353,7 +354,7 @@ pub async fn parse_events(
 
                         signer: sink.account_id(),
                     };
-
+                    log::info!("MsgChannelOpenTry: {:?}", msg);
                     let value = msg.encode_vec().map_err(|e| {
                         Error::Custom(format!(
                             "[get_messages_for_events - open_chan_init] Error encoding message: {:?}",
