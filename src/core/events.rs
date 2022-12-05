@@ -577,7 +577,6 @@ pub async fn parse_events(
                     )?,
                     signer: sink.account_id(),
                 };
-
                 let value = msg.encode_vec().map_err(|e| {
                     Error::Custom(format!(
                         "[get_messages_for_events - send_packet] Error encoding message: {:?}",

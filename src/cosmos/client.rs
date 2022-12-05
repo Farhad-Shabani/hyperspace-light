@@ -308,7 +308,7 @@ where
         prove: bool,
     ) -> Result<(AbciQuery, Vec<u8>), Error> {
         // SAFETY: Creating a Path from a constant; this should never fail
-        let path = IBC_QUERY_PATH.to_string();
+        let path = IBC_QUERY_PATH.into();
         let height = TmHeight::try_from(height_query.revision_height())
             .map_err(|e| Error::from(format!("Invalid height {}", e)))?;
 

@@ -104,6 +104,7 @@ where
         C: Chain,
     {
         let client_id = counterparty.client_id();
+        let latest_height = self.latest_height_and_timestamp().await?.0;
         let latest_cp_height = counterparty.latest_height_and_timestamp().await?.0;
         let latest_cp_client_state = counterparty
             .query_client_state(latest_cp_height, client_id)
@@ -115,10 +116,9 @@ where
         let client_state = ClientState::try_from(client_state_response)
             .map_err(|_| Error::Custom("failed to decode client state response".to_string()))?;
         let latest_cp_client_height = client_state.latest_height().revision_height();
-        let latest_height = self.rpc_client.latest_block().await?.block.header.height;
 
         let mut ibc_events: Vec<IbcEventWithHeight> = vec![];
-        for height in latest_cp_client_height + 1..latest_height.value() + 1 {
+        for height in latest_cp_client_height + 1..latest_height.revision_height() + 1 {
             let block_results = self
                 .rpc_client
                 .block_results(TmHeight::try_from(height).unwrap())
@@ -138,8 +138,15 @@ where
                     let ibc_event = ibc_event_try_from_abci_event(&event).ok();
                     match ibc_event {
                         Some(ev) => {
-                            ibc_events
-                                .push(IbcEventWithHeight::new(ev, client_state.latest_height()));
+                            log::info!("Found IBC event with Height: {:?}", height);
+                            ibc_events.push(IbcEventWithHeight::new(
+                                ev,
+                                Height::new(
+                                    latest_height.revision_number(),
+                                    block_results.height.value(),
+                                )
+                                .unwrap(),
+                            ));
                         }
                         None => continue,
                     }
@@ -166,6 +173,7 @@ where
                 type_url: msg.type_url(),
             }
         };
+        log::info!("Found IBC events: {:?}", ibc_events);
         Ok((update_client_header, ibc_events, update_header.1))
     }
 
