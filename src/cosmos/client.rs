@@ -43,8 +43,8 @@ use ibc_relayer_types::{
 };
 use prost::Message;
 use serde::Deserialize;
-use tendermint::abci::transaction::Hash;
 use std::str::FromStr;
+use tendermint::abci::transaction::Hash;
 use tendermint::{
     abci::{Code, Path as TendermintABCIPath},
     block::Height as TmHeight,
@@ -205,7 +205,6 @@ where
 
     pub async fn submit_call(&self, messages: Vec<Any>) -> Result<Hash, Error> {
         let account_info = self.query_account().await?;
-
         // Sign transaction
         let (tx, _, tx_bytes) = sign_tx(
             self.keybase.clone(),
@@ -222,7 +221,6 @@ where
                 granter: "".to_string(),
             },
         )?;
-
         // Simulate transaction
         let _ = simulate_tx(self.grpc_url.clone(), tx, tx_bytes.clone()).await?;
 
@@ -312,7 +310,7 @@ where
         data: Vec<u8>,
         height_query: Height,
         prove: bool,
-    ) -> Result<(Vec<u8>, Vec<u8>), Error> {
+    ) -> Result<(AbciQuery, Vec<u8>), Error> {
         // SAFETY: Creating a Path from a constant; this should never fail
         let path = tendermint::abci::Path::from_str(IBC_QUERY_PATH)
             .expect("Turning IBC query path constant into a Tendermint ABCI path");
@@ -345,15 +343,23 @@ where
             )));
         }
 
+        if prove && response.proof.is_none() {
+            // Fail due to empty proof
+            return Err(Error::from(format!(
+                "Query failed due to empty proof for chain {}",
+                self.name
+            )));
+        }
+
         let merkle_proof = response
+            .clone()
             .proof
             .map(|p| convert_tm_to_ics_merkle_proof(&p))
-            .ok_or_else(|| Error::Custom(format!("bad client state proof")))?;
-
-        let proof = CommitmentProofBytes::try_from(merkle_proof.unwrap())
+            .transpose()
+            .map_err(|_| Error::Custom(format!("bad client state proof")))?;
+            let proof = CommitmentProofBytes::try_from(merkle_proof.unwrap())
             .map_err(|err| Error::Custom(format!("bad client state proof: {}", err)))?;
-
-        Ok((response.value, proof.into()))
+        Ok((response, proof.into()))
     }
 
     pub async fn query_tendermint_proof(

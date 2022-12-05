@@ -26,7 +26,6 @@ macro_rules! process_finality_event {
                     .collect::<Vec<_>>();
                 let (mut messages, timeouts) =
                     crate::core::events::parse_events(&mut $source, &mut $sink, events).await?;
-                log::info!(target: "hyperspace-light", "🧾 {} events from {}", event_types.len(), $source.name());
                 if !timeouts.is_empty() {
                     let type_urls = timeouts
                         .iter()
@@ -37,6 +36,7 @@ macro_rules! process_finality_event {
                 }
                 // We want to send client update if packet messages exist but where not sent due to
                 // a connection delay even if client update message is optional
+                log::info!(target: "hyperspace-light", "🧾 {} messages to be sent to {}", messages.len(), $sink.name());
                 match (
                     update_type.is_optional(),
                     crate::core::events::has_packet_events(&event_types),

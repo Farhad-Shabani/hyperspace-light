@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use super::packets::query_ready_and_timed_out_packets;
-#[cfg(feature = "testing")]
-use crate::send_packet_relay::packet_relay_status;
 use crate::{
     core::{error::Error, primitives::Chain},
     cosmos::events::IbcEventWithHeight,
@@ -519,10 +517,6 @@ pub async fn parse_events(
                 messages.push(msg)
             }
             IbcEvent::SendPacket(send_packet) => {
-                #[cfg(feature = "testing")]
-                if !packet_relay_status() {
-                    continue;
-                }
                 // can we send this packet?
                 // 1. query the connection and get the connection delay.
                 // 2. if none, send message immediately
@@ -561,7 +555,6 @@ pub async fn parse_events(
                     .await?;
                 let commitment_proof =
                     CommitmentProofBytes::try_from(packet_commitment_response.proof)?;
-
                 let proof_height = packet_commitment_response
                     .proof_height
                     .expect("Proof height should be present");
@@ -575,7 +568,13 @@ pub async fn parse_events(
                         })?;
                 let msg = MsgRecvPacket {
                     packet: packet.clone(),
-                    proofs: Proofs::new(commitment_proof, None, None, None, proof_height)?,
+                    proofs: Proofs::new(
+                        commitment_proof,
+                        None,
+                        None,
+                        None,
+                        proof_height.increment(),
+                    )?,
                     signer: sink.account_id(),
                 };
 
@@ -671,10 +670,10 @@ pub async fn parse_events(
     }
 
     // 2. query packets that can now be sent, at this sink height because of connection delay.
-    let (ready_packets, timed_out_packets) =
-        query_ready_and_timed_out_packets(source, sink).await?;
-    messages.extend(ready_packets);
-    Ok((messages, timed_out_packets))
+    // let (ready_packets, timed_out_packets) =
+    //     query_ready_and_timed_out_packets(source, sink).await?;
+    // messages.extend(ready_packets);
+    Ok((messages, vec![]))
 }
 
 /// Fetch the connection proof for the sink chain.

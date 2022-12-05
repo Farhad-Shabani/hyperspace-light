@@ -8,6 +8,7 @@ use ibc_proto::cosmos::base::v1beta1::Coin;
 use ibc_relayer_types::{
     applications::transfer::msgs::transfer::MsgTransfer,
     core::{
+        ics02_client::height::Height,
         ics04_channel::timeout::TimeoutHeight,
         ics24_host::identifier::{ChannelId, PortId},
     },
@@ -53,8 +54,8 @@ where
     B::FinalityEvent: Send + Sync,
     B::Error: From<A::Error>,
 {
-    log::info!(target: "hyperspace-light", "📡 Sending packet with connection delay");
     let (previous_balance, ..) = send_transfer(chain_a, chain_b, channel_id.clone()).await;
+    log::info!(target: "hyperspace-light", "Previous balance: {}", previous_balance);
     assert_send_transfer(chain_a, previous_balance, 20 * 60).await;
     // now send from chain b.
     let (previous_balance, ..) = send_transfer(chain_b, chain_a, channel_id).await;
@@ -78,21 +79,21 @@ where
         .expect("Can't query ibc balance")
         .pop()
         .expect("No Ibc balances");
-    let amount = parse_amount(balance.amount.to_string()) / 100;
+    let amount = parse_amount(balance.amount.to_string()) / 10;
     let coin = Coin {
         denom: balance.denom.to_string(),
         amount: amount.to_string(),
     };
 
-    let (height_offset, time_offset) = (200, 60 * 60);
+    log::info!(target: "hyperspace-light", "📡 Sending {} {} from {} to {}", amount, coin.denom, chain_a.name(), chain_b.name());
+    let (height_offset, time_offset) = (2000, 600 * 60);
 
-    let (mut timeout_height, timestamp) = chain_b
+    let (timeout_height, timestamp) = chain_b
         .latest_height_and_timestamp()
         .await
         .expect("Couldn't fetch latest_height_and_timestamp");
 
-    let mut revision_height = timeout_height.revision_height();
-    revision_height += height_offset;
+    let revision_height = timeout_height.revision_height() + height_offset;
     let timeout_timestamp =
         (timestamp + Duration::from_secs(time_offset)).expect("Overflow evaluating timeout");
 
@@ -102,7 +103,9 @@ where
         token: coin,
         sender: chain_a.account_id(),
         receiver: chain_b.account_id(),
-        timeout_height: TimeoutHeight::At(timeout_height),
+        timeout_height: TimeoutHeight::At(
+            Height::new(timeout_height.revision_number(), revision_height).unwrap(),
+        ),
         timeout_timestamp: Timestamp::from(timeout_timestamp),
     };
     chain_a
@@ -139,7 +142,8 @@ where
         .expect("No Ibc balances");
 
     let new_amount = parse_amount(balance.amount.to_string());
-    assert!(new_amount <= (previous_balance * 80) / 100);
+    log::info!(target: "hyperspace-light", "🧾 Balance on {} is {}", chain.name(), new_amount);
+    assert!(new_amount <= (previous_balance * 90) / 100);
 }
 
 /// Send a packet using a height timeout that has already passed

@@ -12,7 +12,10 @@ use futures::{
     Stream, StreamExt,
 };
 use ibc_proto::cosmos::bank::v1beta1::QueryBalanceRequest;
-use ibc_proto::ibc::core::channel::v1::QueryChannelRequest;
+use ibc_proto::ibc::core::channel::v1::{
+    QueryChannelRequest, QueryNextSequenceReceiveRequest, QueryPacketAcknowledgementRequest,
+    QueryPacketCommitmentRequest, QueryPacketReceiptRequest,
+};
 use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest;
 use ibc_proto::{
     google::protobuf::Any,
@@ -24,8 +27,8 @@ use ibc_proto::{
             QueryPacketReceiptResponse,
         },
         client::v1::{
-            QueryClientStateRequest, QueryClientStateResponse, QueryClientStatesRequest,
-            QueryConsensusStateResponse,
+            Height as IbcHeight, QueryClientStateRequest, QueryClientStateResponse,
+            QueryClientStatesRequest, QueryConsensusStateResponse,
         },
         connection::v1::{
             IdentifiedConnection, QueryConnectionRequest, QueryConnectionResponse,
@@ -45,10 +48,14 @@ use ibc_relayer_types::{
             client_type::ClientType, events as ClientEvents, msgs::update_client::MsgUpdateClient,
             trust_threshold::TrustThreshold,
         },
+        ics04_channel::packet::Sequence,
         ics23_commitment::{commitment::CommitmentPrefix, specs::ProofSpecs},
         ics24_host::{
             identifier::{ChainId, ChannelId, ClientId, ConnectionId, PortId},
-            path::{ChannelEndsPath, ClientConsensusStatePath, ClientStatePath, ConnectionsPath},
+            path::{
+                AcksPath, ChannelEndsPath, ClientConsensusStatePath, ClientStatePath,
+                CommitmentsPath, ConnectionsPath, Path, ReceiptsPath, SeqRecvsPath,
+            },
         },
     },
     events::IbcEvent,
@@ -69,6 +76,7 @@ use tendermint_rpc::{
     Client, Error as RpcError, Order, SubscriptionClient, WebSocketClient,
 };
 use tonic::metadata::AsciiMetadataValue;
+use tonic::IntoRequest;
 pub enum FinalityEvent {
     Tendermint(Header),
 }
@@ -89,7 +97,7 @@ where
 
     async fn query_latest_ibc_events<C>(
         &mut self,
-        finality_event: Self::FinalityEvent,
+        _finality_event: Self::FinalityEvent,
         counterparty: &C,
     ) -> Result<(Any, Vec<IbcEventWithHeight>, UpdateType), anyhow::Error>
     where
@@ -280,17 +288,17 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-
-        let keys = format!(
-            "{}",
-            ClientConsensusStatePath {
-                client_id: client_id.clone(),
-                epoch: consensus_height.revision_number(),
-                height: consensus_height.revision_height(),
-            }
-        );
-        let (_, proof) = self.query_path(keys.into_bytes(), at, true).await?;
-
+        let path = Path::ClientConsensusState(ClientConsensusStatePath {
+            client_id: client_id.clone(),
+            epoch: consensus_height.revision_number(),
+            height: consensus_height.revision_height(),
+        });
+        let path_bytes = vec![format!("{}", path).into_bytes()];
+        let proof = self.query_proof(at, path_bytes).await?;
+        let proof_height = Some(IbcHeight {
+            revision_number: at.revision_number(),
+            revision_height: at.revision_height(),
+        });
         Ok(QueryConsensusStateResponse {
             consensus_state: response.consensus_state,
             proof,
@@ -318,10 +326,13 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-
-        let keys = format!("{}", ClientStatePath(client_id.clone()));
-        let proof = self.query_proof(at, vec![keys.into_bytes()]).await?;
-
+        let path = Path::ClientState(ClientStatePath(client_id.clone()));
+        let path_bytes = vec![format!("{}", path).into_bytes()];
+        let proof = self.query_proof(at, path_bytes).await?;
+        let proof_height = Some(IbcHeight {
+            revision_number: at.revision_number(),
+            revision_height: at.revision_height(),
+        });
         Ok(QueryClientStateResponse {
             client_state: response.client_state,
             proof,
@@ -358,9 +369,13 @@ where
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
 
-        let keys = format!("{}", ConnectionsPath(connection_id.clone()));
-        let proof = self.query_proof(at, vec![keys.into_bytes()]).await?;
-
+        let path = Path::Connections(ConnectionsPath(connection_id.clone()));
+        let path_bytes = vec![format!("{}", path).into_bytes()];
+        let proof = self.query_proof(at, path_bytes).await?;
+        let proof_height = Some(IbcHeight {
+            revision_number: at.revision_number(),
+            revision_height: at.revision_height(),
+        });
         Ok(QueryConnectionResponse {
             connection: response.connection,
             proof,
@@ -374,7 +389,6 @@ where
         channel_id: ChannelId,
         port_id: PortId,
     ) -> Result<QueryChannelResponse, Self::Error> {
-        use tonic::IntoRequest;
         let mut grpc_client =
             ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
                 self.grpc_url.clone().to_string(),
@@ -393,10 +407,11 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-
-        let keys = format!("{}", ChannelEndsPath(port_id.clone(), channel_id.clone()));
-        let proof = self.query_proof(at, vec![keys.into_bytes()]).await?;
-
+        let path = Path::ChannelEnds(ChannelEndsPath(port_id.clone(), channel_id.clone()));
+        let proof = self
+            .query_proof(at, vec![format!("{}", path).into_bytes()])
+            .await?;
+        
         Ok(QueryChannelResponse {
             channel: response.channel,
             proof,
@@ -416,7 +431,41 @@ where
         channel_id: &ChannelId,
         seq: u64,
     ) -> Result<QueryPacketCommitmentResponse, Self::Error> {
-        todo!()
+        let mut grpc_client =
+            ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+                self.grpc_url.clone().to_string(),
+            )
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryPacketCommitmentRequest {
+            port_id: port_id.to_string(),
+            channel_id: channel_id.to_string(),
+            sequence: seq,
+        }
+        .into_request();
+
+        let response = grpc_client
+            .packet_commitment(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
+        let path = Path::Commitments(CommitmentsPath {
+            port_id: port_id.clone(),
+            channel_id: channel_id.clone(),
+            sequence: Sequence::from(seq),
+        });
+        let path_bytes = format!("{}", path).into_bytes();
+        let (res, proof) = self.query_path(path_bytes, at, true).await?;
+        let proof_height = Some(IbcHeight {
+            revision_number: at.revision_number(),
+            revision_height: at.revision_height(),
+        });
+        Ok(QueryPacketCommitmentResponse {
+            commitment: response.commitment,
+            proof,
+            proof_height: response.proof_height,
+        })
     }
 
     async fn query_packet_acknowledgement(
@@ -426,7 +475,41 @@ where
         channel_id: &ChannelId,
         seq: u64,
     ) -> Result<QueryPacketAcknowledgementResponse, Self::Error> {
-        todo!()
+        let mut grpc_client =
+            ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+                self.grpc_url.clone().to_string(),
+            )
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryPacketAcknowledgementRequest {
+            port_id: port_id.to_string(),
+            channel_id: channel_id.to_string(),
+            sequence: seq,
+        }
+        .into_request();
+
+        let response = grpc_client
+            .packet_acknowledgement(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
+        let path = Path::Acks(AcksPath {
+            port_id: port_id.clone(),
+            channel_id: channel_id.clone(),
+            sequence: Sequence::from(seq),
+        });
+        let path_bytes = format!("{}", path).into_bytes();
+        let (res, proof) = self.query_path(path_bytes, at, true).await?;
+        let proof_height = Some(IbcHeight {
+            revision_number: at.revision_number(),
+            revision_height: at.revision_height(),
+        });
+        Ok(QueryPacketAcknowledgementResponse {
+            acknowledgement: res.value,
+            proof,
+            proof_height: response.proof_height,
+        })
     }
 
     async fn query_next_sequence_recv(
@@ -435,7 +518,36 @@ where
         port_id: &PortId,
         channel_id: &ChannelId,
     ) -> Result<QueryNextSequenceReceiveResponse, Self::Error> {
-        todo!()
+        let mut grpc_client =
+            ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+                self.grpc_url.clone().to_string(),
+            )
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryNextSequenceReceiveRequest {
+            port_id: port_id.to_string(),
+            channel_id: channel_id.to_string(),
+        }
+        .into_request();
+
+        let response = grpc_client
+            .next_sequence_receive(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
+        let path = Path::SeqRecvs(SeqRecvsPath(port_id.clone(), channel_id.clone()));
+        let path_bytes = format!("{}", path).into_bytes();
+        let (res, proof) = self.query_path(path_bytes, at, true).await?;
+        let proof_height = Some(IbcHeight {
+            revision_number: at.revision_number(),
+            revision_height: at.revision_height(),
+        });
+        Ok(QueryNextSequenceReceiveResponse {
+            next_sequence_receive: response.next_sequence_receive,
+            proof,
+            proof_height: response.proof_height,
+        })
     }
 
     async fn query_packet_receipt(
@@ -445,7 +557,42 @@ where
         channel_id: &ChannelId,
         seq: u64,
     ) -> Result<QueryPacketReceiptResponse, Self::Error> {
-        todo!()
+        let mut grpc_client =
+            ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+                self.grpc_url.clone().to_string(),
+            )
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryPacketReceiptRequest {
+            port_id: port_id.to_string(),
+            channel_id: channel_id.to_string(),
+            sequence: seq,
+        }
+        .into_request();
+
+        let response = grpc_client
+            .packet_receipt(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
+
+        let path = Path::Receipts(ReceiptsPath {
+            port_id: port_id.clone(),
+            channel_id: channel_id.clone(),
+            sequence: Sequence::from(seq),
+        });
+        let path_bytes = format!("{}", path).into_bytes();
+        let (res, proof) = self.query_path(path_bytes, at, true).await?;
+        let proof_height = Some(IbcHeight {
+            revision_number: at.revision_number(),
+            revision_height: at.revision_height(),
+        });
+        Ok(QueryPacketReceiptResponse {
+            received: true, //TODO
+            proof,
+            proof_height: response.proof_height,
+        })
     }
 
     async fn latest_height_and_timestamp(&self) -> Result<(Height, Timestamp), Self::Error> {
@@ -547,6 +694,53 @@ where
         port_id: PortId,
         seqs: Vec<u64>,
     ) -> Result<Vec<PacketInfo>, Self::Error> {
+        // let mut block_events = vec![];
+
+        for seq in seqs {
+            let query_str = Query::eq(
+                format!("{}.packet_src_channel", "send_packet"),
+                channel_id.to_string(),
+            )
+            .and_eq(
+                format!("{}.packet_src_port", "send_packet"),
+                port_id.to_string(),
+            )
+            .and_eq(
+                format!("{}.packet_sequence", "send_packet"),
+                seq.to_string(),
+            );
+
+            let mut response = self
+                .rpc_client
+                .block_search(
+                    query_str,
+                    1,
+                    1, // get only the first Tx matching the query
+                    Order::Ascending,
+                )
+                .await
+                .map_err(|e| Error::RpcError(format!("{:?}", e)))?;
+
+            // if let Some(block) = response.blocks.first().map(|first| &first.block) {
+            //     let tm_height =
+            //         tendermint::block::Height::try_from(block.header.height.value()).unwrap();
+            //     let response = self
+            //         .rpc_client
+            //         .block_results(tm_height)
+            //         .await
+            //         .map_err(|e| Error::RpcError(format!("{:?}", e)))?;
+
+            //     block_events.append(
+            //         &mut response
+            //             .begin_block_events
+            //             .unwrap_or_default()
+            //             .into_iter()
+            //             .filter_map(|ev| filter_matching_event(ev, request, seqs))
+            //             .map(|ev| IbcEventWithHeight::new(ev, response_height))
+            //             .collect(),
+            //     );
+            // }
+        }
         todo!()
     }
 
@@ -579,7 +773,7 @@ where
     }
 
     async fn query_ibc_balance(&self) -> Result<Vec<PrefixedCoin>, Self::Error> {
-        let denom = "stake";
+        let denom = "samoleans";
         let mut grpc_client = ibc_proto::cosmos::bank::v1beta1::query_client::QueryClient::connect(
             self.grpc_url.clone().to_string(),
         )

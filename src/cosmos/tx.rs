@@ -66,7 +66,6 @@ pub async fn simulate_tx(
         tx: Some(tx), // needed for simulation to go through with Cosmos SDK <  0.43
         tx_bytes,     // needed for simulation to go through with Cosmos SDk >= 0.43
     };
-
     let mut client = ServiceClient::connect(grpc_url.clone().to_string())
         .await
         .map_err(|e| Error::from(e.to_string()))?;
@@ -76,7 +75,6 @@ pub async fn simulate_tx(
         .await
         .map_err(|e| Error::from(e.to_string()))?
         .into_inner();
-
     Ok(response)
 }
 
