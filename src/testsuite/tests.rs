@@ -29,7 +29,7 @@ where
     B::Error: From<A::Error>,
 {
     let (handle, channel_id, channel_b, _connection_id) =
-        setup_connection_and_channel(chain_a, chain_b, Duration::from_secs(60 * 5)).await; // 5 mins delay
+        setup_connection_and_channel(chain_a, chain_b, Duration::from_secs(0)).await;
     handle.abort();
     log::info!(target: "hyperspace-light", "🧹 Relay thread aborted");
     // Set channel whitelist and restart relayer loop
@@ -56,14 +56,14 @@ where
 {
     let (previous_balance, ..) = send_transfer(chain_a, chain_b, channel_id.clone()).await;
     log::info!(target: "hyperspace-light", "Previous balance: {}", previous_balance);
-    assert_send_transfer(chain_a, previous_balance, 20 * 60).await;
+    assert_send_transfer(chain_a, previous_balance, 60).await;
     // now send from chain b.
     let (previous_balance, ..) = send_transfer(chain_b, chain_a, channel_id).await;
-    assert_send_transfer(chain_b, previous_balance, 20 * 60).await;
+    assert_send_transfer(chain_b, previous_balance, 60).await;
     log::info!(target: "hyperspace-light", "🙌🙌🙌 Token Transfer successful with connection delay");
 }
 
-/// Attempts to send 20% of funds of chain_a's signer to chain b's signer.
+/// Attempts to send 10% of funds of chain_a's signer to chain b's signer.
 async fn send_transfer<A, B>(chain_a: &A, chain_b: &B, channel_id: ChannelId) -> (u128, MsgTransfer)
 where
     A: TestProvider,
@@ -86,7 +86,7 @@ where
     };
 
     log::info!(target: "hyperspace-light", "📡 Sending {} {} from {} to {}", amount, coin.denom, chain_a.name(), chain_b.name());
-    let (height_offset, time_offset) = (2000, 600 * 60);
+    let (height_offset, time_offset) = (2000, 60 * 60);
 
     let (timeout_height, timestamp) = chain_b
         .latest_height_and_timestamp()

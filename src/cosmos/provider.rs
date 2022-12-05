@@ -14,7 +14,9 @@ use futures::{
 use ibc_proto::cosmos::bank::v1beta1::QueryBalanceRequest;
 use ibc_proto::ibc::core::channel::v1::{
     QueryChannelRequest, QueryNextSequenceReceiveRequest, QueryPacketAcknowledgementRequest,
-    QueryPacketCommitmentRequest, QueryPacketReceiptRequest,
+    QueryPacketAcknowledgementsRequest, QueryPacketCommitmentRequest,
+    QueryPacketCommitmentsRequest, QueryPacketReceiptRequest, QueryUnreceivedAcksRequest,
+    QueryUnreceivedPacketsRequest,
 };
 use ibc_proto::ibc::core::client::v1::QueryConsensusStateRequest;
 use ibc_proto::{
@@ -462,12 +464,8 @@ where
             channel_id: channel_id.clone(),
             sequence: Sequence::from(seq),
         });
-        let path_bytes = format!("{}", path).into_bytes();
-        let (res, proof) = self.query_path(path_bytes, at, true).await?;
-        let proof_height = Some(IbcHeight {
-            revision_number: at.revision_number(),
-            revision_height: at.revision_height(),
-        });
+        let path_bytes = vec![format!("{}", path).into_bytes()];
+        let proof = self.query_proof(at, path_bytes).await?;
         Ok(QueryPacketCommitmentResponse {
             commitment: response.commitment,
             proof,
@@ -508,10 +506,6 @@ where
         });
         let path_bytes = format!("{}", path).into_bytes();
         let (res, proof) = self.query_path(path_bytes, at, true).await?;
-        let proof_height = Some(IbcHeight {
-            revision_number: at.revision_number(),
-            revision_height: at.revision_height(),
-        });
         Ok(QueryPacketAcknowledgementResponse {
             acknowledgement: res.value,
             proof,
@@ -544,12 +538,8 @@ where
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
         let path = Path::SeqRecvs(SeqRecvsPath(port_id.clone(), channel_id.clone()));
-        let path_bytes = format!("{}", path).into_bytes();
-        let (res, proof) = self.query_path(path_bytes, at, true).await?;
-        let proof_height = Some(IbcHeight {
-            revision_number: at.revision_number(),
-            revision_height: at.revision_height(),
-        });
+        let path_bytes = vec![format!("{}", path).into_bytes()];
+        let proof = self.query_proof(at, path_bytes).await?;
         Ok(QueryNextSequenceReceiveResponse {
             next_sequence_receive: response.next_sequence_receive,
             proof,
@@ -589,12 +579,8 @@ where
             channel_id: channel_id.clone(),
             sequence: Sequence::from(seq),
         });
-        let path_bytes = format!("{}", path).into_bytes();
-        let (res, proof) = self.query_path(path_bytes, at, true).await?;
-        let proof_height = Some(IbcHeight {
-            revision_number: at.revision_number(),
-            revision_height: at.revision_height(),
-        });
+        let path_bytes = vec![format!("{}", path).into_bytes()];
+        let proof = self.query_proof(at, path_bytes).await?;
         Ok(QueryPacketReceiptResponse {
             received: true, //TODO
             proof,
@@ -625,30 +611,103 @@ where
 
     async fn query_packet_commitments(
         &self,
-        at: Height,
+        _at: Height,
         channel_id: ChannelId,
         port_id: PortId,
     ) -> Result<Vec<u64>, Self::Error> {
-        todo!()
+        let mut grpc_client =
+            ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+                self.grpc_url.clone().to_string(),
+            )
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryPacketCommitmentsRequest {
+            port_id: port_id.to_string(),
+            channel_id: channel_id.to_string(),
+            pagination: None,
+        };
+        let request = tonic::Request::new(request);
+        let response = grpc_client
+            .packet_commitments(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
+
+        let commitment_sequences: Vec<u64> = response
+            .commitments
+            .into_iter()
+            .map(|v| v.sequence.into())
+            .collect();
+
+        Ok(commitment_sequences)
     }
 
     async fn query_packet_acknowledgements(
         &self,
-        at: Height,
+        _at: Height,
         channel_id: ChannelId,
         port_id: PortId,
     ) -> Result<Vec<u64>, Self::Error> {
-        todo!()
+        let mut grpc_client =
+            ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+                self.grpc_url.clone().to_string(),
+            )
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryPacketAcknowledgementsRequest {
+            port_id: port_id.to_string(),
+            channel_id: channel_id.to_string(),
+            packet_commitment_sequences: vec![],
+            pagination: None,
+        };
+        let request = tonic::Request::new(request);
+        let response = grpc_client
+            .packet_acknowledgements(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
+
+        let commitment_sequences: Vec<u64> = response
+            .acknowledgements
+            .into_iter()
+            .map(|v| v.sequence.into())
+            .collect();
+
+        Ok(commitment_sequences)
     }
 
     async fn query_unreceived_packets(
         &self,
-        at: Height,
+        _at: Height,
         channel_id: ChannelId,
         port_id: PortId,
         seqs: Vec<u64>,
     ) -> Result<Vec<u64>, Self::Error> {
-        todo!()
+        let mut grpc_client =
+            ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+                self.grpc_url.clone().to_string(),
+            )
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryUnreceivedPacketsRequest {
+            port_id: port_id.to_string(),
+            channel_id: channel_id.to_string(),
+            packet_commitment_sequences: seqs.into(),
+        };
+        let request = tonic::Request::new(request);
+        let response = grpc_client
+            .unreceived_packets(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
+
+        let commitment_sequences: Vec<u64> =
+            response.sequences.into_iter().map(|v| v.into()).collect();
+
+        Ok(commitment_sequences)
     }
 
     async fn query_unreceived_acknowledgements(
@@ -658,7 +717,29 @@ where
         port_id: PortId,
         seqs: Vec<u64>,
     ) -> Result<Vec<u64>, Self::Error> {
-        todo!()
+        let mut grpc_client =
+            ibc_proto::ibc::core::channel::v1::query_client::QueryClient::connect(
+                self.grpc_url.clone().to_string(),
+            )
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+
+        let request = QueryUnreceivedAcksRequest {
+            port_id: port_id.to_string(),
+            channel_id: channel_id.to_string(),
+            packet_ack_sequences: seqs.into(),
+        };
+        let request = tonic::Request::new(request);
+        let response = grpc_client
+            .unreceived_acks(request)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?
+            .into_inner();
+
+        let commitment_sequences: Vec<u64> =
+            response.sequences.into_iter().map(|v| v.into()).collect();
+
+        Ok(commitment_sequences)
     }
 
     fn channel_whitelist(&self) -> Vec<(ChannelId, PortId)> {
@@ -761,7 +842,7 @@ where
     }
 
     fn expected_block_time(&self) -> Duration {
-        todo!()
+        Duration::from_secs(30)
     }
 
     async fn query_client_update_time_and_height(
