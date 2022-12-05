@@ -43,25 +43,25 @@ thiserror = "1.0.31"
 
 
 # ibc
-ibc = { version = "0.22.0" }
-ibc-proto = { version = "0.21.0" }
-ibc-relayer-types = { version = "0.20.0" }
+ibc = { version = "0.23.0" }
+ibc-proto = { version = "0.23.0" }
+ibc-relayer-types = { git = "https://github.com/informalsystems/hermes.git" }
 
 # tendermint
-tendermint = { version = "0.25.0", default-features = false, features = [
+tendermint = { version = "0.27.0", default-features = false, features = [
     "secp256k1",
 ] }
-tendermint-proto = { version = "0.25.0", default-features = false }
-tendermint-rpc = { version = "0.25.0", features = [
+tendermint-proto = { version = "0.27.0", default-features = false }
+tendermint-rpc = { version = "0.27.0", features = [
     "http-client",
     "websocket-client",
 ] }
-tendermint-light-client = { version = "0.25.0", default-features = false, features = [
+tendermint-light-client = { version = "0.27.0", default-features = false, features = [
     "rpc-client",
     "secp256k1",
     "unstable",
 ] }
-tendermint-light-client-verifier = { version = "0.25.0", default-features = false }
+tendermint-light-client-verifier = { version = "0.27.0", default-features = false }
 # tendermint-testgen = { version = "0.25.0" }
 
 [[test]]

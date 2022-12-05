@@ -16,7 +16,7 @@ where
     /// Initiate an ibc transfer on chain.
     async fn send_transfer(&self, msg: MsgTransfer) -> Result<(), Self::Error> {
         let hash = self.submit_call(vec![msg.to_any()]).await?;
-        log::info!(target: "hyperspace-light", "🤝 Transfer transaction confirmed with hash: {}", hash);
+        log::info!(target: "hyperspace-light", "🤝 Transfer transaction confirmed with hash: {:?}", hash);
         Ok(())
     }
 

@@ -43,12 +43,8 @@ use ibc_relayer_types::{
 };
 use prost::Message;
 use serde::Deserialize;
-use std::str::FromStr;
-use tendermint::abci::transaction::Hash;
-use tendermint::{
-    abci::{Code, Path as TendermintABCIPath},
-    block::Height as TmHeight,
-};
+use tendermint::Hash;
+use tendermint::{abci::Code, block::Height as TmHeight};
 use tendermint_light_client::components::io::{AtHeight, Io};
 use tendermint_rpc::{endpoint::abci_query::AbciQuery, Client, HttpClient, Url};
 
@@ -312,9 +308,7 @@ where
         prove: bool,
     ) -> Result<(AbciQuery, Vec<u8>), Error> {
         // SAFETY: Creating a Path from a constant; this should never fail
-        let path = tendermint::abci::Path::from_str(IBC_QUERY_PATH)
-            .expect("Turning IBC query path constant into a Tendermint ABCI path");
-
+        let path = IBC_QUERY_PATH.to_string();
         let height = TmHeight::try_from(height_query.revision_height())
             .map_err(|e| Error::from(format!("Invalid height {}", e)))?;
 
@@ -357,7 +351,7 @@ where
             .map(|p| convert_tm_to_ics_merkle_proof(&p))
             .transpose()
             .map_err(|_| Error::Custom(format!("bad client state proof")))?;
-            let proof = CommitmentProofBytes::try_from(merkle_proof.unwrap())
+        let proof = CommitmentProofBytes::try_from(merkle_proof.unwrap())
             .map_err(|err| Error::Custom(format!("bad client state proof: {}", err)))?;
         Ok((response, proof.into()))
     }
@@ -369,7 +363,7 @@ where
     ) -> Result<(Vec<u8>, Vec<u8>), Error> {
         let path = format!("store/{}/key", STORE_KEY)
             .as_str()
-            .parse::<TendermintABCIPath>()
+            .parse()
             .map_err(|err| Error::Custom(format!("failed to parse path: {}", err)));
         let height = TmHeight::try_from(height.revision_height()).map_err(|e| {
             Error::from(format!(

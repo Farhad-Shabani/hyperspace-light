@@ -15,6 +15,7 @@
 use crate::core::error::Error;
 use ibc_relayer_types::{timestamp::Timestamp, Height};
 use std::time::Duration;
+use core::ops::Add;
 
 /// Verify the time and height delays
 pub fn has_delay_elapsed(
@@ -30,7 +31,6 @@ pub fn has_delay_elapsed(
     if !(current_time == earliest_time || current_time.after(&earliest_time)) {
         return Ok(false);
     }
-
     let earliest_height = client_update_height.add(delay_period_blocks);
     if current_height < earliest_height {
         return Ok(false);

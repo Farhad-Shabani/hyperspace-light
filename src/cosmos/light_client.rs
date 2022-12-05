@@ -52,8 +52,8 @@ impl LightClient {
     ) -> Result<TmLightClient, Error> {
         let params = TmOptions {
             trust_threshold: TrustThresholdFraction::new(
-                client_state.trust_level.numerator(),
-                client_state.trust_level.denominator(),
+                client_state.trust_threshold.numerator(),
+                client_state.trust_threshold.denominator(),
             )
             .unwrap(),
             trusting_period: client_state.trusting_period,

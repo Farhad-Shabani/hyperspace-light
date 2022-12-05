@@ -92,7 +92,7 @@ where
     H: Clone + Send + Sync + 'static,
 {
     type FinalityEvent = FinalityEvent;
-    type TransactionId = TransactionId<tendermint::abci::transaction::Hash>;
+    type TransactionId = TransactionId<tendermint::Hash>;
     type Error = Error;
 
     async fn query_latest_ibc_events<C>(

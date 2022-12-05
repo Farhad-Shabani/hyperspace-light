@@ -94,7 +94,7 @@ pub fn event_is_type_channel(ev: &IbcEvent) -> bool {
 /// defined in this crate. Hence, we are forced to make an ad-hoc function for
 /// it.
 pub fn ibc_event_try_from_abci_event(abci_event: &AbciEvent) -> Result<IbcEvent, IbcEventError> {
-    match abci_event.type_str.parse() {
+    match abci_event.kind.parse() {
         Ok(IbcEventType::CreateClient) => Ok(IbcEvent::CreateClient(
             create_client_try_from_abci_event(abci_event).map_err(IbcEventError::client)?,
         )),
@@ -156,7 +156,7 @@ pub fn ibc_event_try_from_abci_event(abci_event: &AbciEvent) -> Result<IbcEvent,
             timeout_packet_try_from_abci_event(abci_event).map_err(IbcEventError::channel)?,
         )),
         _ => Err(IbcEventError::unsupported_abci_event(
-            abci_event.type_str.to_owned(),
+            abci_event.kind.to_owned(),
         )),
     }
 }
@@ -281,7 +281,7 @@ pub fn send_packet_try_from_abci_event(
             debug_assert_eq!(write_ack.len(), 0);
             channel_events::SendPacket { packet }
         })
-        .map_err(|_| ChannelError::abci_conversion_failed(abci_event.type_str.to_owned()))
+        .map_err(|_| ChannelError::abci_conversion_failed(abci_event.kind.to_owned()))
 }
 
 pub fn write_acknowledgement_try_from_abci_event(
@@ -292,7 +292,7 @@ pub fn write_acknowledgement_try_from_abci_event(
             packet,
             ack: write_ack,
         })
-        .map_err(|_| ChannelError::abci_conversion_failed(abci_event.type_str.to_owned()))
+        .map_err(|_| ChannelError::abci_conversion_failed(abci_event.kind.to_owned()))
 }
 
 pub fn acknowledge_packet_try_from_abci_event(
@@ -304,7 +304,7 @@ pub fn acknowledge_packet_try_from_abci_event(
             debug_assert_eq!(write_ack.len(), 0);
             channel_events::AcknowledgePacket { packet }
         })
-        .map_err(|_| ChannelError::abci_conversion_failed(abci_event.type_str.to_owned()))
+        .map_err(|_| ChannelError::abci_conversion_failed(abci_event.kind.to_owned()))
 }
 
 pub fn timeout_packet_try_from_abci_event(
@@ -316,15 +316,15 @@ pub fn timeout_packet_try_from_abci_event(
             debug_assert_eq!(write_ack.len(), 0);
             channel_events::TimeoutPacket { packet }
         })
-        .map_err(|_| ChannelError::abci_conversion_failed(abci_event.type_str.to_owned()))
+        .map_err(|_| ChannelError::abci_conversion_failed(abci_event.kind.to_owned()))
 }
 
 fn client_extract_attributes_from_tx(event: &AbciEvent) -> Result<ClientAttributes, ClientError> {
     let mut attr = ClientAttributes::default();
 
     for tag in &event.attributes {
-        let key = tag.key.as_ref();
-        let value = tag.value.as_ref();
+        let key = tag.key.as_str();
+        let value = tag.value.as_str();
         match key {
             client_events::CLIENT_ID_ATTRIBUTE_KEY => {
                 attr.client_id = value
@@ -350,8 +350,8 @@ fn client_extract_attributes_from_tx(event: &AbciEvent) -> Result<ClientAttribut
 
 pub fn extract_header_from_tx(event: &AbciEvent) -> Result<Box<dyn Header>, ClientError> {
     for tag in &event.attributes {
-        let key = tag.key.as_ref();
-        let value = tag.value.as_ref();
+        let key = tag.key.as_str();
+        let value = tag.value.as_str();
         if key == HEADER_ATTRIBUTE_KEY {
             let header_bytes = hex::decode(value).map_err(|_| ClientError::malformed_header())?;
             return decode_header(&header_bytes);
@@ -366,8 +366,8 @@ fn connection_extract_attributes_from_tx(
     let mut attr = ConnectionAttributes::default();
 
     for tag in &event.attributes {
-        let key = tag.key.as_ref();
-        let value = tag.value.as_ref();
+        let key = tag.key.as_str();
+        let value = tag.value.as_str();
         match key {
             connection_events::CONN_ID_ATTRIBUTE_KEY => {
                 attr.connection_id = value.parse().ok();
@@ -395,8 +395,8 @@ fn channel_extract_attributes_from_tx(
     let mut attr = ChannelAttributes::default();
 
     for tag in &event.attributes {
-        let key = tag.key.as_ref();
-        let value = tag.value.as_ref();
+        let key = tag.key.as_str();
+        let value = tag.value.as_str();
         match key {
             channel_events::PORT_ID_ATTRIBUTE_KEY => {
                 attr.port_id = value.parse().map_err(ChannelError::identifier)?
@@ -426,8 +426,8 @@ fn extract_packet_and_write_ack_from_tx(
     let mut packet = Packet::default();
     let mut write_ack: Vec<u8> = Vec::new();
     for tag in &event.attributes {
-        let key = tag.key.as_ref();
-        let value = tag.value.as_ref();
+        let key = tag.key.as_str();
+        let value = tag.value.as_str();
         match key {
             channel_events::PKT_SRC_PORT_ATTRIBUTE_KEY => {
                 packet.source_port = value.parse().map_err(ChannelError::identifier)?;
