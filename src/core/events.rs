@@ -60,8 +60,9 @@ pub async fn parse_events(
     source: &mut impl Chain,
     sink: &mut impl Chain,
     events: Vec<IbcEventWithHeight>,
-) -> Result<(Vec<Any>, Vec<Any>), anyhow::Error> {
+) -> Result<(Vec<Any>, Vec<Any>, Height), anyhow::Error> {
     let mut messages = vec![];
+    let mut proof_height_ref = Height::new(0, 1).unwrap();
     // 1. translate events to messages
     for ev in events {
         log::info!(
@@ -102,6 +103,13 @@ pub async fn parse_events(
                             e
                         ))
                             })?;
+                    proof_height_ref =
+                        if proof_height_ref.revision_height() >= proof_height.revision_height() {
+                            proof_height_ref
+                        } else {
+                            proof_height
+                        };
+                    log::info!("proof_height_ref: {:?}", proof_height_ref);
                     let client_state_proof =
                         CommitmentProofBytes::try_from(client_state_response.proof).ok();
 
@@ -138,12 +146,11 @@ pub async fn parse_events(
                                 client_state.latest_height(),
                             )?),
                             None,
-                            proof_height.increment(),
+                            proof_height,
                         )?,
                         delay_period: connection_end.delay_period(),
                         signer: sink.account_id(),
                     };
-                    log::info!("MsgConnectionOpenTry: {:?}", msg);
                     let value = msg.encode_vec().map_err(|e| {
                         Error::Custom(format!(
                             "[get_messages_for_events - open_conn_init] Error encoding message: {:?}",
@@ -173,7 +180,6 @@ pub async fn parse_events(
                         })?,
                     )?;
                     let counterparty = connection_end.counterparty();
-
                     let connection_proof =
                         CommitmentProofBytes::try_from(connection_response.proof)?;
                     let client_state_response = source
@@ -189,6 +195,12 @@ pub async fn parse_events(
                             e
                         ))
                             })?;
+                    proof_height_ref =
+                        if proof_height_ref.revision_height() >= proof_height.revision_height() {
+                            proof_height_ref
+                        } else {
+                            proof_height
+                        };
                     let client_state_proof =
                         CommitmentProofBytes::try_from(client_state_response.proof).ok();
                     let client_state = client_state_response
@@ -236,7 +248,6 @@ pub async fn parse_events(
 							.clone(),
 						signer: sink.account_id(),
 					};
-                    log::info!("MsgConnectionOpenAck: {:?}", msg);
                     let value = msg.encode_vec().map_err(|e| {
                         Error::Custom(format!(
                             "[get_messages_for_events - open_conn_try] Error encoding message: {:?}",
@@ -281,7 +292,12 @@ pub async fn parse_events(
                             e
                         ))
                             })?;
-
+                    proof_height_ref =
+                        if proof_height_ref.revision_height() >= proof_height.revision_height() {
+                            proof_height_ref
+                        } else {
+                            proof_height
+                        };
                     // Construct OpenConfirm
                     let msg = MsgConnectionOpenConfirm {
 						connection_id: counterparty
@@ -344,9 +360,15 @@ pub async fn parse_events(
                             e
                         ))
                             })?;
+                    proof_height_ref =
+                        if proof_height_ref.revision_height() >= proof_height.revision_height() {
+                            proof_height_ref
+                        } else {
+                            proof_height
+                        };
 
                     let msg = MsgChannelOpenTry {
-                        previous_channel_id: None,
+                        previous_channel_id: counterparty.channel_id.clone(),
                         port_id: counterparty.port_id.clone(),
                         channel,
                         counterparty_version: channel_end.version,
@@ -394,7 +416,12 @@ pub async fn parse_events(
                             e
                         ))
                             })?;
-
+                    proof_height_ref =
+                        if proof_height_ref.revision_height() >= proof_height.revision_height() {
+                            proof_height_ref
+                        } else {
+                            proof_height
+                        };
                     let msg = MsgChannelOpenAck {
                         port_id: counterparty.port_id.clone(),
                         counterparty_version: channel_end.version.clone(),
@@ -445,7 +472,12 @@ pub async fn parse_events(
                             e
                         ))
                             })?;
-
+                    proof_height_ref =
+                        if proof_height_ref.revision_height() >= proof_height.revision_height() {
+                            proof_height_ref
+                        } else {
+                            proof_height
+                        };
                     let msg = MsgChannelOpenConfirm {
                         port_id: counterparty.port_id.clone(),
                         proofs: Proofs::new(channel_proof, None, None, None, proof_height)?,
@@ -494,7 +526,12 @@ pub async fn parse_events(
                         e
                     ))
                         })?;
-
+                proof_height_ref =
+                    if proof_height_ref.revision_height() >= proof_height.revision_height() {
+                        proof_height_ref
+                    } else {
+                        proof_height
+                    };
                 let msg = MsgChannelCloseConfirm {
                     port_id: counterparty.port_id.clone(),
                     proofs: Proofs::new(channel_proof, None, None, None, proof_height)?,
@@ -567,17 +604,18 @@ pub async fn parse_events(
                             e
                         ))
                         })?;
+                proof_height_ref =
+                    if proof_height_ref.revision_height() >= proof_height.revision_height() {
+                        proof_height_ref
+                    } else {
+                        proof_height
+                    };
                 let msg = MsgRecvPacket {
                     packet: packet.clone(),
-                    proofs: Proofs::new(
-                        commitment_proof,
-                        None,
-                        None,
-                        None,
-                        proof_height.increment(),
-                    )?,
+                    proofs: Proofs::new(commitment_proof, None, None, None, proof_height)?,
                     signer: sink.account_id(),
                 };
+                log::info!("Sending message: {:?}", msg);
                 let value = msg.encode_vec().map_err(|e| {
                     Error::Custom(format!(
                         "[get_messages_for_events - send_packet] Error encoding message: {:?}",
@@ -638,6 +676,12 @@ pub async fn parse_events(
                                 e
                             ))
                         })?;
+                proof_height_ref =
+                    if proof_height_ref.revision_height() >= proof_height.revision_height() {
+                        proof_height_ref
+                    } else {
+                        proof_height
+                    };
                 let msg = MsgAcknowledgement {
                     packet,
                     acknowledgement: acknowledgement.into(),
@@ -673,7 +717,7 @@ pub async fn parse_events(
     // let (ready_packets, timed_out_packets) =
     //     query_ready_and_timed_out_packets(source, sink).await?;
     // messages.extend(ready_packets);
-    Ok((messages, vec![]))
+    Ok((messages, vec![], proof_height_ref))
 }
 
 /// Fetch the connection proof for the sink chain.

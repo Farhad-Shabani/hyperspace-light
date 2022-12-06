@@ -218,17 +218,17 @@ where
             },
         )?;
         // Simulate transaction
-        let _ = simulate_tx(self.grpc_url.clone(), tx, tx_bytes.clone()).await?;
-
+        // let res = simulate_tx(self.grpc_url.clone(), tx, tx_bytes.clone()).await?;
         // Broadcast transaction
         let hash = broadcast_tx(&self.rpc_client, tx_bytes).await?;
+        log::info!("Transaction sent with hash: {:?}", hash);
 
         // wait for confirmation
         confirm_tx(&self.rpc_client, hash).await
     }
 
     pub async fn msg_update_client_header(
-        &mut self,
+        &self,
         trusted_height: Height,
     ) -> Result<(Header, UpdateType), Error> {
         let latest_light_block = self
@@ -250,7 +250,7 @@ where
         let trusted_light_block = self
             .light_client
             .io
-            .fetch_light_block(AtHeight::At(height))
+            .fetch_light_block(AtHeight::At(height.increment()))
             .map_err(|e| {
                 Error::from(format!(
                     "Failed to fetch light block for chain {:?} with error {:?}",
@@ -261,9 +261,8 @@ where
         let update_type = match latest_light_block.validators == latest_light_block.next_validators
         {
             true => UpdateType::Optional,
-            false => UpdateType::Mandatory,
+            false => UpdateType::Optional,
         };
-
         Ok((
             Header {
                 signed_header: latest_light_block.signed_header,
@@ -351,6 +350,7 @@ where
             .map(|p| convert_tm_to_ics_merkle_proof(&p))
             .transpose()
             .map_err(|_| Error::Custom(format!("bad client state proof")))?;
+        // log::info!("Merkle proof: {:?}", merkle_proof);
         let proof = CommitmentProofBytes::try_from(merkle_proof.unwrap())
             .map_err(|err| Error::Custom(format!("bad client state proof: {}", err)))?;
         Ok((response, proof.into()))

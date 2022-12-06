@@ -8,14 +8,12 @@ use ibc_proto::cosmos::base::v1beta1::Coin;
 use ibc_proto::{cosmos::tx::v1beta1::Fee, google::protobuf::Any};
 use prost::Message;
 use std::pin::Pin;
-use tendermint::block::Height as TmHeight;
 use tendermint_rpc::{
     event::Event,
     event::EventData,
     query::{EventType, Query},
     SubscriptionClient, WebSocketClient,
 };
-
 #[async_trait::async_trait]
 impl<H> Chain for CosmosClient<H>
 where

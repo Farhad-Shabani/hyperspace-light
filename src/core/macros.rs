@@ -6,8 +6,8 @@ macro_rules! process_finality_event {
             None => break,
             Some(finality_event) => {
                 log::info!(target: "hyperspace-light", "📍 New finality event from {}", $source.name());
-                let (msg_update_client, events, update_type) = match $source
-                    .query_latest_ibc_events(finality_event, &$sink)
+                let (_,events,_) = match $source
+                .query_latest_ibc_events(finality_event.clone(), &$sink)
                     .await
                 {
                     Ok(resp) => resp,
@@ -24,8 +24,8 @@ macro_rules! process_finality_event {
                     .iter()
                     .map(|ev| ev.event.event_type())
                     .collect::<Vec<_>>();
-                let (mut messages, timeouts) =
-                    crate::core::events::parse_events(&mut $source, &mut $sink, events).await?;
+                let (mut messages, timeouts, proof_height_ref) =
+                    crate::core::events::parse_events(&mut $source, &mut $sink, events.clone()).await?;
                 if !timeouts.is_empty() {
                     let type_urls = timeouts
                         .iter()
@@ -36,7 +36,25 @@ macro_rules! process_finality_event {
                 }
                 // We want to send client update if packet messages exist but where not sent due to
                 // a connection delay even if client update message is optional
-                log::info!(target: "hyperspace-light", "🧾 {} messages to be sent to {}", messages.len(), $sink.name());
+                log::info!(target: "hyperspace-light", "🧾 Messages to be sent to {}: {:?}", $sink.name(), event_types);
+                while $source.latest_height_and_timestamp().await?.0 < proof_height_ref {
+                    log::info!("Waiting for source to catch up");
+                    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                }
+                let (msg_update_client,_,update_type) = match $source
+                .query_latest_ibc_events(finality_event.clone(), &$sink)
+                .await
+                {
+                    Ok(resp) => resp,
+                    Err(err) => {
+                        log::error!(
+                            "Failed to fetch IBC events for finality event for {} {:?}",
+                            $source.name(),
+                            err
+                        );
+                        continue;
+                    }
+                };
                 match (
                     update_type.is_optional(),
                     crate::core::events::has_packet_events(&event_types),
@@ -60,11 +78,12 @@ macro_rules! process_finality_event {
                     ),
                 };
                 // insert client update at first position.
-                messages.insert(0, msg_update_client.clone());
+                messages.insert(0, msg_update_client);
                 let type_urls = messages
                     .iter()
                     .map(|msg| msg.type_url.as_str())
                     .collect::<Vec<_>>();
+                log::info!(target: "hyperspace-light", "🧾 {} messages to be sent to {}", messages.len(), $sink.name());
                 log::info!(target: "hyperspace-light", "📡 Sending to {} following messages: {:?}", $sink.name(), type_urls);
                 crate::core::queue::flush_message_batch(messages, &$sink).await?;
             }

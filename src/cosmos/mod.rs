@@ -7,3 +7,4 @@ pub mod light_client;
 pub mod provider;
 pub mod test_provider;
 pub mod tx;
+pub mod utils;

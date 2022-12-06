@@ -3,6 +3,7 @@ use super::events::{
     event_is_type_channel, event_is_type_client, event_is_type_connection,
     ibc_event_try_from_abci_event, IbcEventWithHeight,
 };
+use super::utils::incerement_proof_height;
 use crate::core::error::Error;
 use crate::core::packets::types::PacketInfo;
 use crate::core::primitives::{Chain, IbcProvider, UpdateType};
@@ -74,7 +75,6 @@ use tendermint_rpc::{
     query::{EventType, Query},
     Client, Error as RpcError, Order, SubscriptionClient, WebSocketClient,
 };
-use tonic::metadata::AsciiMetadataValue;
 use tonic::IntoRequest;
 
 #[derive(Clone, Debug)]
@@ -105,7 +105,6 @@ where
         C: Chain,
     {
         let client_id = counterparty.client_id();
-        let latest_height = self.latest_height_and_timestamp().await?.0;
         let latest_cp_height = counterparty.latest_height_and_timestamp().await?.0;
         let latest_cp_client_state = counterparty
             .query_client_state(latest_cp_height, client_id)
@@ -113,10 +112,10 @@ where
         let client_state_response = latest_cp_client_state
             .client_state
             .ok_or_else(|| Error::Custom("counterparty returned empty client state".to_string()))?;
-
         let client_state = ClientState::try_from(client_state_response)
             .map_err(|_| Error::Custom("failed to decode client state response".to_string()))?;
         let latest_cp_client_height = client_state.latest_height().revision_height();
+        let latest_height = self.latest_height_and_timestamp().await?.0;
 
         let mut ibc_events: Vec<IbcEventWithHeight> = vec![];
         for height in latest_cp_client_height + 1..latest_height.revision_height() + 1 {
@@ -139,14 +138,9 @@ where
                     let ibc_event = ibc_event_try_from_abci_event(&event).ok();
                     match ibc_event {
                         Some(ev) => {
-                            log::info!("Found IBC event with Height: {:?}", height);
                             ibc_events.push(IbcEventWithHeight::new(
                                 ev,
-                                Height::new(
-                                    latest_height.revision_number(),
-                                    block_results.height.value(),
-                                )
-                                .unwrap(),
+                                Height::new(latest_height.revision_number(), height).unwrap(),
                             ));
                         }
                         None => continue,
@@ -174,7 +168,6 @@ where
                 type_url: msg.type_url(),
             }
         };
-        log::info!("Found IBC events: {:?}", ibc_events);
         Ok((update_client_header, ibc_events, update_header.1))
     }
 
@@ -297,21 +290,18 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-        let path = Path::ClientConsensusState(ClientConsensusStatePath {
+        let path_bytes = Path::ClientConsensusState(ClientConsensusStatePath {
             client_id: client_id.clone(),
             epoch: consensus_height.revision_number(),
             height: consensus_height.revision_height(),
-        });
-        let path_bytes = vec![format!("{}", path).into_bytes()];
-        let proof = self.query_proof(at, path_bytes).await?;
-        let proof_height = Some(IbcHeight {
-            revision_number: at.revision_number(),
-            revision_height: at.revision_height(),
-        });
+        })
+        .to_string()
+        .into_bytes();
+        let proof = self.query_proof(at, vec![path_bytes]).await?;
         Ok(QueryConsensusStateResponse {
             consensus_state: response.consensus_state,
             proof,
-            proof_height: response.proof_height,
+            proof_height: incerement_proof_height(response.proof_height),
         })
     }
 
@@ -335,17 +325,14 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-        let path = Path::ClientState(ClientStatePath(client_id.clone()));
-        let path_bytes = vec![format!("{}", path).into_bytes()];
-        let proof = self.query_proof(at, path_bytes).await?;
-        let proof_height = Some(IbcHeight {
-            revision_number: at.revision_number(),
-            revision_height: at.revision_height(),
-        });
+        let path_bytes = Path::ClientState(ClientStatePath(client_id.clone()))
+            .to_string()
+            .into_bytes();
+        let proof = self.query_proof(at, vec![path_bytes]).await?;
         Ok(QueryClientStateResponse {
             client_state: response.client_state,
             proof,
-            proof_height: response.proof_height,
+            proof_height: incerement_proof_height(response.proof_height),
         })
     }
 
@@ -366,29 +353,20 @@ where
         }
         .into_request();
 
-        // let height = at.revision_height().to_string();
-        // let height_param = AsciiMetadataValue::try_from(height.as_str()).unwrap();
-        // request
-        //     .metadata_mut()
-        //     .insert("x-cosmos-block-height", height_param);
-
         let response = grpc_client
             .connection(request)
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
 
-        let path = Path::Connections(ConnectionsPath(connection_id.clone()));
-        let path_bytes = vec![format!("{}", path).into_bytes()];
-        let proof = self.query_proof(at, path_bytes).await?;
-        let proof_height = Some(IbcHeight {
-            revision_number: at.revision_number(),
-            revision_height: at.revision_height(),
-        });
+        let path_bytes = Path::Connections(ConnectionsPath(connection_id.clone()))
+            .to_string()
+            .into_bytes();
+        let proof = self.query_proof(at, vec![path_bytes]).await?;
         Ok(QueryConnectionResponse {
             connection: response.connection,
             proof,
-            proof_height: response.proof_height,
+            proof_height: incerement_proof_height(response.proof_height),
         })
     }
 
@@ -416,15 +394,15 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-        let path = Path::ChannelEnds(ChannelEndsPath(port_id.clone(), channel_id.clone()));
-        let proof = self
-            .query_proof(at, vec![format!("{}", path).into_bytes()])
-            .await?;
+        let path_bytes = Path::ChannelEnds(ChannelEndsPath(port_id.clone(), channel_id.clone()))
+            .to_string()
+            .into_bytes();
+        let proof = self.query_proof(at, vec![path_bytes]).await?;
 
         Ok(QueryChannelResponse {
             channel: response.channel,
             proof,
-            proof_height: response.proof_height,
+            proof_height: incerement_proof_height(response.proof_height),
         })
     }
 
@@ -459,17 +437,18 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-        let path = Path::Commitments(CommitmentsPath {
+        let path_bytes = Path::Commitments(CommitmentsPath {
             port_id: port_id.clone(),
             channel_id: channel_id.clone(),
             sequence: Sequence::from(seq),
-        });
-        let path_bytes = vec![format!("{}", path).into_bytes()];
-        let proof = self.query_proof(at, path_bytes).await?;
+        })
+        .to_string()
+        .into_bytes();
+        let proof = self.query_proof(at, vec![path_bytes]).await?;
         Ok(QueryPacketCommitmentResponse {
             commitment: response.commitment,
             proof,
-            proof_height: response.proof_height,
+            proof_height: incerement_proof_height(response.proof_height),
         })
     }
 
@@ -499,17 +478,18 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-        let path = Path::Acks(AcksPath {
+        let path_bytes = Path::Acks(AcksPath {
             port_id: port_id.clone(),
             channel_id: channel_id.clone(),
             sequence: Sequence::from(seq),
-        });
-        let path_bytes = format!("{}", path).into_bytes();
+        })
+        .to_string()
+        .into_bytes();
         let (res, proof) = self.query_path(path_bytes, at, true).await?;
         Ok(QueryPacketAcknowledgementResponse {
             acknowledgement: res.value,
             proof,
-            proof_height: response.proof_height,
+            proof_height: incerement_proof_height(response.proof_height),
         })
     }
 
@@ -537,13 +517,14 @@ where
             .await
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
-        let path = Path::SeqRecvs(SeqRecvsPath(port_id.clone(), channel_id.clone()));
-        let path_bytes = vec![format!("{}", path).into_bytes()];
-        let proof = self.query_proof(at, path_bytes).await?;
+        let path_bytes = Path::SeqRecvs(SeqRecvsPath(port_id.clone(), channel_id.clone()))
+            .to_string()
+            .into_bytes();
+        let proof = self.query_proof(at, vec![path_bytes]).await?;
         Ok(QueryNextSequenceReceiveResponse {
             next_sequence_receive: response.next_sequence_receive,
             proof,
-            proof_height: response.proof_height,
+            proof_height: incerement_proof_height(response.proof_height),
         })
     }
 
@@ -574,17 +555,18 @@ where
             .map_err(|e| Error::from(e.to_string()))?
             .into_inner();
 
-        let path = Path::Receipts(ReceiptsPath {
+        let path_bytes = Path::Receipts(ReceiptsPath {
             port_id: port_id.clone(),
             channel_id: channel_id.clone(),
             sequence: Sequence::from(seq),
-        });
-        let path_bytes = vec![format!("{}", path).into_bytes()];
-        let proof = self.query_proof(at, path_bytes).await?;
+        })
+        .to_string()
+        .into_bytes();
+        let (res, proof) = self.query_path(path_bytes, at, true).await?;
         Ok(QueryPacketReceiptResponse {
-            received: true, //TODO
+            received: res.value[0] == 1,
             proof,
-            proof_height: response.proof_height,
+            proof_height: incerement_proof_height(response.proof_height),
         })
     }
 
@@ -712,7 +694,7 @@ where
 
     async fn query_unreceived_acknowledgements(
         &self,
-        at: Height,
+        _at: Height,
         channel_id: ChannelId,
         port_id: PortId,
         seqs: Vec<u64>,
@@ -748,7 +730,7 @@ where
 
     async fn query_connection_channels(
         &self,
-        at: Height,
+        _at: Height,
         connection_id: &ConnectionId,
     ) -> Result<QueryChannelsResponse, Self::Error> {
         let mut grpc_client =
@@ -1023,8 +1005,8 @@ where
         let client_state = ClientState::new(
             self.chain_id.clone(),
             TrustThreshold::default(),
-            Duration::new(64000, 0),
-            Duration::new(128000, 0),
+            Duration::from_secs(64000),
+            Duration::from_secs(1814400),
             Duration::new(15, 0),
             latest_height_timestamp.0,
             ProofSpecs::default(),
