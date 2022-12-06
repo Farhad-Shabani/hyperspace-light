@@ -40,7 +40,6 @@ where
     let handle =
         tokio::task::spawn(async move { relay(client_a_clone, client_b_clone).await.unwrap() });
     send_packet_with_connection_delay(chain_a, chain_b, channel_id).await;
-    log::info!(target: "hyperspace-light", "🧹 Relay thread aborted");
     handle.abort()
 }
 
@@ -60,7 +59,7 @@ where
     // now send from chain b.
     let (previous_balance, ..) = send_transfer(chain_b, chain_a, channel_id).await;
     assert_send_transfer(chain_b, previous_balance, 120).await;
-    log::info!(target: "hyperspace-light", "🙌🙌🙌 Token Transfer successful with connection delay");
+    log::info!(target: "hyperspace-light", "🙌🙌🙌 Token Transfer successfully completed 🙌🙌🙌");
 }
 
 /// Attempts to send 10% of funds of chain_a's signer to chain b's signer.
@@ -148,7 +147,7 @@ where
 
 /// Send a packet using a height timeout that has already passed
 /// and assert the sending chain sees the timeout packet.
-async fn send_packet_and_assert_height_timeout<A, B>(
+async fn _send_packet_and_assert_height_timeout<A, B>(
     chain_a: &A,
     chain_b: &B,
     channel_id: ChannelId,

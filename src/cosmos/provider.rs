@@ -30,8 +30,8 @@ use ibc_proto::{
             QueryPacketReceiptResponse,
         },
         client::v1::{
-            Height as IbcHeight, QueryClientStateRequest, QueryClientStateResponse,
-            QueryClientStatesRequest, QueryConsensusStateResponse,
+            QueryClientStateRequest, QueryClientStateResponse, QueryClientStatesRequest,
+            QueryConsensusStateResponse,
         },
         connection::v1::{
             IdentifiedConnection, QueryConnectionRequest, QueryConnectionResponse,
@@ -206,7 +206,7 @@ where
                 let mut events_with_height: Vec<IbcEventWithHeight> = vec![];
                 let Event {
                     data,
-                    events,
+                    events: _,
                     query,
                 } = event.unwrap();
                 match data {

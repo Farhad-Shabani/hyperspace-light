@@ -38,7 +38,6 @@ macro_rules! process_finality_event {
                 // a connection delay even if client update message is optional
                 log::info!(target: "hyperspace-light", "🧾 Messages to be sent to {}: {:?}", $sink.name(), event_types);
                 while $source.latest_height_and_timestamp().await?.0 < proof_height_ref {
-                    log::info!("Waiting for source to catch up");
                     tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
                 }
                 let (msg_update_client,_,update_type) = match $source
@@ -62,19 +61,18 @@ macro_rules! process_finality_event {
                 ) {
                     (true, false, true) => {
                         // skip sending ibc messages if no new events
-                        log::info!(
-                            "Skipping finality notification for {}, No new events",
+                        log::info!(target: "hyperspace-light",
+                            "🧾 Skipping finality notification for {}, No new events",
                             $source.name()
                         );
                         continue;
                     }
-                    (false, _, true) => log::info!(
-                        "Sending mandatory client update message for {}",
+                    (false, _, true) => log::info!(target: "hyperspace-light",
+                        "🧾 Sending mandatory client update message for {}",
                         $source.name()
                     ),
                     _ => log::info!(
-                        target: "hyperspace-light", "🧾 Received finalized events from {}: {event_types:#?}",
-                        $source.name()
+                        target: "hyperspace-light", "🧾 Received finalized evenes: {:?}", event_types
                     ),
                 };
                 // insert client update at first position.

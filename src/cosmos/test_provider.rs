@@ -23,8 +23,8 @@ where
     /// Send a packet on an ordered channel
     async fn send_ordered_packet(
         &self,
-        channel_id: ChannelId,
-        timeout: u64,
+        _channel_id: ChannelId,
+        _timeout: u64,
     ) -> Result<(), Self::Error> {
         todo!()
     }

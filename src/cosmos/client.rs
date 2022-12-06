@@ -39,12 +39,11 @@ use ibc_relayer_types::{
             IBC_QUERY_PATH,
         },
     },
-    keys::STORE_KEY,
 };
 use prost::Message;
 use serde::Deserialize;
+use tendermint::block::Height as TmHeight;
 use tendermint::Hash;
-use tendermint::{abci::Code, block::Height as TmHeight};
 use tendermint_light_client::components::io::{AtHeight, Io};
 use tendermint_rpc::{endpoint::abci_query::AbciQuery, Client, HttpClient, Url};
 
@@ -219,9 +218,10 @@ where
         )?;
         // Simulate transaction
         // let res = simulate_tx(self.grpc_url.clone(), tx, tx_bytes.clone()).await?;
+
         // Broadcast transaction
         let hash = broadcast_tx(&self.rpc_client, tx_bytes).await?;
-        log::info!("Transaction sent with hash: {:?}", hash);
+        log::info!(target: "hyperspace-light", "🤝 Transaction sent with hash: {:?}", hash);
 
         // wait for confirmation
         confirm_tx(&self.rpc_client, hash).await

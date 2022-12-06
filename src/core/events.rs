@@ -1,18 +1,4 @@
-// Copyright 2022 ComposableFi
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-use super::packets::query_ready_and_timed_out_packets;
+// use super::packets::query_ready_and_timed_out_packets;
 use crate::{
     core::{error::Error, primitives::Chain},
     cosmos::events::IbcEventWithHeight,
@@ -31,7 +17,7 @@ use ibc_relayer_types::{
             },
         },
         ics04_channel::{
-            channel::{ChannelEnd, Counterparty as ChannelCounterparty},
+            channel::{ChannelEnd, Counterparty as ChannelCounterparty, State},
             msgs::{
                 acknowledgement::MsgAcknowledgement, chan_close_confirm::MsgChannelCloseConfirm,
                 chan_open_ack::MsgChannelOpenAck, chan_open_confirm::MsgChannelOpenConfirm,
@@ -67,9 +53,7 @@ pub async fn parse_events(
     for ev in events {
         log::info!(
             target: "hyperspace-light",
-            "🔍 Processing event: {:?} at height: {}",
-            ev.event,
-            ev.height
+            "🔍 Processing event with type of {:?} for height {}", ev.event.event_type(), ev.height
         );
         match ev.event {
             IbcEvent::OpenInitConnection(open_init) => {
@@ -340,7 +324,7 @@ pub async fn parse_events(
                     // Construct the channel end as we expect it to be constructed on the
                     // receiving chain
                     let channel = ChannelEnd::new(
-                        channel_end.state,
+                        State::TryOpen,
                         channel_end.ordering,
                         ChannelCounterparty::new(open_init.port_id, Some(channel_id)),
                         channel_end.connection_hops.clone(),
@@ -615,7 +599,6 @@ pub async fn parse_events(
                     proofs: Proofs::new(commitment_proof, None, None, None, proof_height)?,
                     signer: sink.account_id(),
                 };
-                log::info!("Sending message: {:?}", msg);
                 let value = msg.encode_vec().map_err(|e| {
                     Error::Custom(format!(
                         "[get_messages_for_events - send_packet] Error encoding message: {:?}",
