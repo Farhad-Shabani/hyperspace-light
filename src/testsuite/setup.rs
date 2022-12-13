@@ -1,7 +1,7 @@
 use super::create::{create_channel, create_clients, create_connection};
-use crate::core::primitives::{IbcProvider, TestProvider};
 use crate::core::relay::relay;
 use crate::cosmos::{client::CosmosClient, client::CosmosClientConfig, key_provider::KeyEntry};
+use crate::primitives::traits::{IbcProvider, TestProvider};
 use futures::{future, StreamExt};
 use ibc_relayer_types::events::IbcEvent;
 use std::{path::PathBuf, str::FromStr};

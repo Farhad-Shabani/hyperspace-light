@@ -1,8 +1,8 @@
 use super::client::CosmosClient;
 use super::tx::sign_tx;
 use crate::core::error::Error;
-use crate::core::primitives::{Chain, IbcProvider};
 use crate::cosmos::provider::FinalityEvent;
+use crate::primitives::traits::{Chain, IbcProvider};
 use futures::{Stream, StreamExt};
 use ibc_proto::cosmos::base::v1beta1::Coin;
 use ibc_proto::{cosmos::tx::v1beta1::Fee, google::protobuf::Any};

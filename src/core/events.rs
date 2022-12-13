@@ -1,8 +1,6 @@
 // use super::packets::query_ready_and_timed_out_packets;
-use crate::{
-    core::{error::Error, primitives::Chain},
-    cosmos::events::IbcEventWithHeight,
-};
+use crate::primitives::traits::Chain;
+use crate::{core::error::Error, cosmos::events::IbcEventWithHeight};
 use codec::Encode;
 use ibc_proto::protobuf::Protobuf;
 use ibc_proto::{google::protobuf::Any, ibc::core::client::v1::QueryConsensusStateResponse};

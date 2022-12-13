@@ -1,6 +1,6 @@
 use super::client::CosmosClient;
 use crate::core::error::Error;
-use crate::core::primitives::KeyProvider;
+use crate::primitives::traits::KeyProvider;
 use bech32::{ToBase32, Variant};
 use bitcoin::{
     hashes::hex::ToHex,

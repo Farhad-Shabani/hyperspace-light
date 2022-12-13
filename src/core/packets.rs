@@ -17,9 +17,12 @@ pub mod types;
 pub mod utils;
 
 use super::error::Error;
-use super::primitives::{
-    find_suitable_proof_height_for_client, packet_info_to_packet, query_undelivered_acks,
-    query_undelivered_sequences, Chain,
+use crate::primitives::{
+    funcs::{
+        find_suitable_proof_height_for_client, packet_info_to_packet, query_undelivered_acks,
+        query_undelivered_sequences,
+    },
+    traits::Chain,
 };
 use ibc_proto::google::protobuf::Any;
 use ibc_relayer_types::{

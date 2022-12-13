@@ -1,4 +1,4 @@
-use super::primitives::Chain;
+use crate::primitives::traits::Chain;
 use crate::process_finality_event;
 use futures::StreamExt;
 

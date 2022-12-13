@@ -1,5 +1,5 @@
 use super::client::CosmosClient;
-use crate::core::primitives::TestProvider;
+use crate::primitives::traits::TestProvider;
 use core::pin::Pin;
 use futures::Stream;
 use ibc_relayer_types::{

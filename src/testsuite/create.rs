@@ -1,4 +1,4 @@
-use crate::core::primitives::Chain;
+use crate::primitives::traits::Chain;
 use futures::{future, StreamExt};
 use ibc_proto::google::protobuf::Any;
 use ibc_proto::protobuf::Protobuf;

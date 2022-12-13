@@ -6,7 +6,7 @@ use super::events::{
 use super::utils::incerement_proof_height;
 use crate::core::error::Error;
 use crate::core::packets::types::PacketInfo;
-use crate::core::primitives::{Chain, IbcProvider, UpdateType};
+use crate::primitives::traits::{Chain, IbcProvider, UpdateType};
 use core::time::Duration;
 use futures::{
     stream::{self, select_all},

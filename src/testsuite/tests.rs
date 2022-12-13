@@ -1,7 +1,7 @@
 #![allow(clippy::all)]
 use super::create::timeout_future;
 use super::setup::setup_connection_and_channel;
-use crate::core::primitives::TestProvider;
+use crate::primitives::traits::TestProvider;
 use crate::core::relay::relay;
 use futures::{future, StreamExt};
 use ibc_proto::cosmos::base::v1beta1::Coin;

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::primitives::Chain;
+use crate::primitives::traits::Chain;
 use ibc_proto::google::protobuf::Any;
 
 /// This sends messages to the sink chain in a gas-aware manner.
